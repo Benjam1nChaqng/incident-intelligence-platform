@@ -47,5 +47,6 @@ python -m ruff check .
 
 ## Current Checkpoint
 
-Checkpoint 1 establishes the repository, roadmap, packaging metadata, and a tested `/healthz`
-endpoint.
+Checkpoint 2 adds Pydantic schemas for synthetic support tickets, log events, and correlated
+event bundles. The committed fixture models an authentication failure without real user,
+employer, client, or account data.

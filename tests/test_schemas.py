@@ -1,0 +1,86 @@
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from incident_intel.schemas import EventBundle, LogEvent, SupportTicket
+
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "auth_failure_bundle.json"
+
+
+def test_support_ticket_accepts_synthetic_customer_issue() -> None:
+    ticket = SupportTicket.model_validate(
+        {
+            "ticket_id": "TCK-1001",
+            "subject": "User cannot sign in after password reset",
+            "description": "Synthetic user reports repeated sign-in failures after a reset.",
+            "priority": "high",
+            "source": "helpdesk",
+            "requester_role": "Finance Manager",
+            "created_at": "2026-08-26T15:21:00Z",
+            "tags": ["authentication", "password-reset"],
+        }
+    )
+
+    assert ticket.ticket_id == "TCK-1001"
+    assert ticket.created_at == datetime(2026, 8, 26, 15, 21, tzinfo=UTC)
+    assert ticket.tags == ("authentication", "password-reset")
+
+
+def test_log_event_requires_synthetic_redaction_marker_for_user_identifiers() -> None:
+    with pytest.raises(ValidationError, match="synthetic_user_id"):
+        LogEvent.model_validate(
+            {
+                "event_id": "LOG-2001",
+                "observed_at": "2026-08-26T15:22:04Z",
+                "service": "identity-provider",
+                "severity": "warning",
+                "message": "Failed login for finance.manager@example.com",
+                "synthetic_user_id": "finance.manager@example.com",
+                "attributes": {"ip": "203.0.113.10"},
+            }
+        )
+
+
+def test_event_bundle_links_ticket_and_logs_by_correlation_id() -> None:
+    bundle = EventBundle.model_validate(
+        {
+            "correlation_id": "INC-AUTH-0001",
+            "ticket": {
+                "ticket_id": "TCK-1001",
+                "subject": "User cannot sign in after password reset",
+                "description": "Synthetic user reports repeated sign-in failures after a reset.",
+                "priority": "high",
+                "source": "helpdesk",
+                "requester_role": "Finance Manager",
+                "created_at": "2026-08-26T15:21:00Z",
+                "tags": ["authentication"],
+            },
+            "logs": [
+                {
+                    "event_id": "LOG-2001",
+                    "observed_at": "2026-08-26T15:22:04Z",
+                    "service": "identity-provider",
+                    "severity": "warning",
+                    "message": "Synthetic user failed MFA challenge.",
+                    "synthetic_user_id": "user-auth-001",
+                    "attributes": {"auth_method": "mfa_push", "result": "denied"},
+                }
+            ],
+        }
+    )
+
+    assert bundle.correlation_id == "INC-AUTH-0001"
+    assert bundle.ticket.priority == "high"
+    assert bundle.logs[0].attributes["result"] == "denied"
+
+
+def test_auth_failure_fixture_matches_event_bundle_schema() -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+    bundle = EventBundle.model_validate(payload)
+
+    assert bundle.correlation_id == "INC-AUTH-0001"
+    assert len(bundle.logs) == 2

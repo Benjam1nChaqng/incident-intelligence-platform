@@ -22,7 +22,8 @@ tested systems that support incident triage and response drafting.
 All examples and fixtures must be synthetic or safely redacted. Do not commit real employer,
 client, school, personal account, ticket, or log data.
 
-## First Vertical Slice
+## Current Vertical Slice
 
-The first slice starts with a tested health endpoint so packaging, local verification, and service
-shape are real before adding ingestion behavior.
+The first slice started with a tested health endpoint so packaging, local verification, and service
+shape are real. The current slice adds strict synthetic ticket and log schemas before ingestion,
+including a fixture that demonstrates authentication failure evidence without real identifiers.
