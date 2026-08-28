@@ -24,6 +24,6 @@ client, school, personal account, ticket, or log data.
 
 ## Current Vertical Slice
 
-The first slice started with a tested health endpoint so packaging, local verification, and service
-shape are real. The current slice adds strict synthetic ticket and log schemas before ingestion,
-including a fixture that demonstrates authentication failure evidence without real identifiers.
+The current slice exposes a tested ingestion endpoint for synthetic event bundles. It validates
+ticket and log payloads, requires an idempotency key, and suppresses duplicate submissions through
+a small in-memory store that will later be replaced by the PostgreSQL repository boundary.

@@ -47,6 +47,6 @@ python -m ruff check .
 
 ## Current Checkpoint
 
-Checkpoint 2 adds Pydantic schemas for synthetic support tickets, log events, and correlated
-event bundles. The committed fixture models an authentication failure without real user,
-employer, client, or account data.
+Checkpoint 3 adds `POST /events` for ingesting a validated synthetic event bundle with an
+`Idempotency-Key` header. Repeated keys return the original ingestion summary as a duplicate
+without creating a second in-memory record.
