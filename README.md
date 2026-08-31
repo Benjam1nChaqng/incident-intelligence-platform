@@ -47,7 +47,14 @@ python -m ruff check .
 
 ## Current Checkpoint
 
-Checkpoint 4 adds the PostgreSQL investigation-history boundary behind the existing ingestion
-contract. The API still uses the in-memory store for local tests, while
-`PostgresInvestigationHistoryStore` defines the table shape and insert-once behavior that will be
-wired to a real database in a later Docker Compose checkpoint.
+Checkpoint 5 adds deterministic authentication-failure evidence extraction. The API can now
+preview a structured investigation summary from a synthetic event bundle, including affected
+synthetic users, normalized signals, risk level, and a support-facing summary.
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8000/investigations/auth-failure-preview `
+  -ContentType "application/json" `
+  -InFile .\tests\fixtures\auth_failure_bundle.json
+```

@@ -24,10 +24,10 @@ client, school, personal account, ticket, or log data.
 
 ## Current Vertical Slice
 
-The current slice keeps the tested ingestion endpoint for synthetic event bundles and adds a
-PostgreSQL investigation-history boundary. The boundary stores the idempotency key, correlation
-ID, ticket ID, log count, and original JSONB event bundle, using `ON CONFLICT DO NOTHING` so
-duplicate deliveries return the first stored investigation summary.
+The current slice keeps the tested ingestion endpoint and PostgreSQL investigation-history
+boundary, then adds deterministic authentication-failure evidence extraction. Given a synthetic
+event bundle, the API can return normalized signals such as MFA denial, account lockout, and
+repeated failures, plus affected synthetic users and a support-facing summary.
 
 The live FastAPI app still defaults to the in-memory store so local development and tests do not
 require credentials or a running database. A later checkpoint should wire this boundary into

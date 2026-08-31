@@ -46,7 +46,7 @@ that slice while replacing process-local state with explicit domain and persiste
 
 ## Non-Goals
 
-- Processing real Xobee, Richmond College Prep, Axora, Minerva, or other client data.
+- Processing real employer, school, customer, or client data.
 - Building a general-purpose ticketing product, chat interface, or visual dashboard in the first
   release.
 - Automatically sending customer responses or taking remediation actions.

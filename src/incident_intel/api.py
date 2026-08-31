@@ -4,6 +4,7 @@ from fastapi import FastAPI, Header, Response
 from pydantic import BaseModel
 
 from incident_intel import __version__
+from incident_intel.auth_failures import AuthFailureEvidence, extract_auth_failure_evidence
 from incident_intel.ingestion import InMemoryIngestionStore
 from incident_intel.schemas import EventBundle
 
@@ -59,3 +60,8 @@ def ingest_event_bundle(
         ticket_id=record.ticket_id,
         log_count=record.log_count,
     )
+
+
+@app.post("/investigations/auth-failure-preview", response_model=AuthFailureEvidence)
+def preview_auth_failure_evidence(bundle: EventBundle) -> AuthFailureEvidence:
+    return extract_auth_failure_evidence(bundle)
