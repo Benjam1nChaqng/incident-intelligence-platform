@@ -24,6 +24,11 @@ client, school, personal account, ticket, or log data.
 
 ## Current Vertical Slice
 
-The current slice exposes a tested ingestion endpoint for synthetic event bundles. It validates
-ticket and log payloads, requires an idempotency key, and suppresses duplicate submissions through
-a small in-memory store that will later be replaced by the PostgreSQL repository boundary.
+The current slice keeps the tested ingestion endpoint for synthetic event bundles and adds a
+PostgreSQL investigation-history boundary. The boundary stores the idempotency key, correlation
+ID, ticket ID, log count, and original JSONB event bundle, using `ON CONFLICT DO NOTHING` so
+duplicate deliveries return the first stored investigation summary.
+
+The live FastAPI app still defaults to the in-memory store so local development and tests do not
+require credentials or a running database. A later checkpoint should wire this boundary into
+Docker Compose with a local PostgreSQL service.

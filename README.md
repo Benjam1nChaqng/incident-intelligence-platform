@@ -47,6 +47,7 @@ python -m ruff check .
 
 ## Current Checkpoint
 
-Checkpoint 3 adds `POST /events` for ingesting a validated synthetic event bundle with an
-`Idempotency-Key` header. Repeated keys return the original ingestion summary as a duplicate
-without creating a second in-memory record.
+Checkpoint 4 adds the PostgreSQL investigation-history boundary behind the existing ingestion
+contract. The API still uses the in-memory store for local tests, while
+`PostgresInvestigationHistoryStore` defines the table shape and insert-once behavior that will be
+wired to a real database in a later Docker Compose checkpoint.
