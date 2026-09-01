@@ -15,6 +15,8 @@ tested systems that support incident triage and response drafting.
 - **Classifier boundary:** turns evidence into incident categories and confidence explanations.
 - **Drafting boundary:** creates runbook or customer-response drafts that require approval.
 - **Webhook worker:** delivers outbound notifications with retries and duplicate suppression.
+- **CI:** runs pytest and Ruff on pushes and pull requests before public portfolio updates are
+  treated as verified.
 - **Observability:** emits structured logs and basic counters useful during demos.
 
 ## Data Policy
@@ -24,10 +26,9 @@ client, school, personal account, ticket, or log data.
 
 ## Current Vertical Slice
 
-The current slice keeps the tested ingestion endpoint and PostgreSQL investigation-history
-boundary, then adds deterministic authentication-failure evidence extraction. Given a synthetic
-event bundle, the API can return normalized signals such as MFA denial, account lockout, and
-repeated failures, plus affected synthetic users and a support-facing summary.
+The current slice keeps the tested ingestion endpoint, PostgreSQL investigation-history boundary,
+and deterministic authentication-failure evidence extraction, then adds GitHub Actions CI. The
+public repository now proves the same local pytest and Ruff checks on pushes and pull requests.
 
 The live FastAPI app still defaults to the in-memory store so local development and tests do not
 require credentials or a running database. A later checkpoint should wire this boundary into

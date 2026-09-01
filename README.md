@@ -21,7 +21,7 @@ No real employer, customer, school, or client data belongs in this repository.
   delivery, and authentication failure normalization.
 - **AI boundary:** classifier and runbook draft interfaces with deterministic test doubles first,
   real LLM calls only after secrets and approval gates are in place.
-- **Verification:** pytest and ruff locally, then CI once core behavior exists.
+- **Verification:** pytest and ruff locally and in GitHub Actions CI.
 - **Runtime:** Docker Compose once the API and PostgreSQL boundary are useful together.
 
 ## Roadmap
@@ -34,7 +34,7 @@ No real employer, customer, school, or client data belongs in this repository.
 6. Add webhook delivery with retry state and duplicate suppression.
 7. Add deterministic incident classification and runbook draft interfaces.
 8. Add human approval flow before response drafts can be marked ready.
-9. Add Docker Compose, CI, basic structured logs, and demo instructions.
+9. Add Docker Compose, basic structured logs, and demo instructions.
 10. Refresh the case study and truthful resume bullets every seventh completed checkpoint.
 
 ## Development
@@ -47,9 +47,9 @@ python -m ruff check .
 
 ## Current Checkpoint
 
-Checkpoint 5 adds deterministic authentication-failure evidence extraction. The API can now
-preview a structured investigation summary from a synthetic event bundle, including affected
-synthetic users, normalized signals, risk level, and a support-facing summary.
+Checkpoint 6 adds GitHub Actions CI for the public repository. Every push to `main` and every pull
+request now runs the same local verification commands used during development: `python -m pytest`
+and `python -m ruff check .`.
 
 ```powershell
 Invoke-RestMethod `
