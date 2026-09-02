@@ -7,6 +7,12 @@ from incident_intel import __version__
 from incident_intel.auth_failures import AuthFailureEvidence, extract_auth_failure_evidence
 from incident_intel.ingestion import InMemoryIngestionStore
 from incident_intel.schemas import EventBundle
+from incident_intel.webhooks import (
+    InMemoryWebhookDeliveryStore,
+    WebhookDeliveryRecord,
+    WebhookDeliveryRequest,
+    record_webhook_delivery,
+)
 
 
 class HealthResponse(BaseModel):
@@ -25,6 +31,7 @@ class IngestionResponse(BaseModel):
 
 
 ingestion_store = InMemoryIngestionStore()
+webhook_delivery_store = InMemoryWebhookDeliveryStore()
 
 app = FastAPI(
     title="Incident Intelligence Platform",
@@ -65,3 +72,20 @@ def ingest_event_bundle(
 @app.post("/investigations/auth-failure-preview", response_model=AuthFailureEvidence)
 def preview_auth_failure_evidence(bundle: EventBundle) -> AuthFailureEvidence:
     return extract_auth_failure_evidence(bundle)
+
+
+@app.post("/webhooks/deliveries/preview", response_model=WebhookDeliveryRecord, status_code=201)
+def preview_webhook_delivery(
+    request: WebhookDeliveryRequest,
+    response: Response,
+    idempotency_key: str = Header(min_length=8),
+) -> WebhookDeliveryRecord:
+    delivery = record_webhook_delivery(
+        store=webhook_delivery_store,
+        idempotency_key=idempotency_key,
+        request=request,
+        status_code=202,
+    )
+    if delivery.duplicate:
+        response.status_code = 200
+    return delivery

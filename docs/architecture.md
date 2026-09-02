@@ -14,7 +14,8 @@ tested systems that support incident triage and response drafting.
 - **Investigation store:** persists incident timelines and operator decisions in PostgreSQL.
 - **Classifier boundary:** turns evidence into incident categories and confidence explanations.
 - **Drafting boundary:** creates runbook or customer-response drafts that require approval.
-- **Webhook worker:** delivers outbound notifications with retries and duplicate suppression.
+- **Webhook delivery boundary:** records outbound notification attempts with retry state and
+  duplicate suppression before any real external integration is connected.
 - **CI:** runs pytest and Ruff on pushes and pull requests before public portfolio updates are
   treated as verified.
 - **Observability:** emits structured logs and basic counters useful during demos.
@@ -27,9 +28,10 @@ client, school, personal account, ticket, or log data.
 ## Current Vertical Slice
 
 The current slice keeps the tested ingestion endpoint, PostgreSQL investigation-history boundary,
-and deterministic authentication-failure evidence extraction, then adds GitHub Actions CI. The
-public repository now proves the same local pytest and Ruff checks on pushes and pull requests.
+deterministic authentication-failure evidence extraction, GitHub Actions CI, and a webhook delivery
+preview boundary. Webhook deliveries are stored in memory for now, suppress duplicate idempotency
+keys, and classify transient failures as retryable without making external calls.
 
 The live FastAPI app still defaults to the in-memory store so local development and tests do not
 require credentials or a running database. A later checkpoint should wire this boundary into
-Docker Compose with a local PostgreSQL service.
+Docker Compose with a local PostgreSQL service and durable webhook state.

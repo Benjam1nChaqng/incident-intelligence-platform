@@ -31,11 +31,12 @@ No real employer, customer, school, or client data belongs in this repository.
 3. Add an ingestion endpoint that deduplicates events by idempotency key.
 4. Persist investigation history in PostgreSQL through a repository boundary.
 5. Normalize authentication failure signals into incident evidence.
-6. Add webhook delivery with retry state and duplicate suppression.
-7. Add deterministic incident classification and runbook draft interfaces.
-8. Add human approval flow before response drafts can be marked ready.
-9. Add Docker Compose, basic structured logs, and demo instructions.
-10. Refresh the case study and truthful resume bullets every seventh completed checkpoint.
+6. Add GitHub Actions CI for pytest and Ruff.
+7. Add webhook delivery with retry state and duplicate suppression.
+8. Add deterministic incident classification and runbook draft interfaces.
+9. Add human approval flow before response drafts can be marked ready.
+10. Add Docker Compose, basic structured logs, and demo instructions.
+11. Refresh the case study and truthful resume bullets every seventh completed checkpoint.
 
 ## Development
 
@@ -47,9 +48,9 @@ python -m ruff check .
 
 ## Current Checkpoint
 
-Checkpoint 6 adds GitHub Actions CI for the public repository. Every push to `main` and every pull
-request now runs the same local verification commands used during development: `python -m pytest`
-and `python -m ruff check .`.
+Checkpoint 7 adds a deterministic webhook delivery boundary. The preview endpoint records outbound
+delivery state, suppresses duplicate idempotency keys, and marks transient HTTP failures as
+retryable without calling any external service.
 
 ```powershell
 Invoke-RestMethod `
@@ -57,4 +58,20 @@ Invoke-RestMethod `
   -Uri http://localhost:8000/investigations/auth-failure-preview `
   -ContentType "application/json" `
   -InFile .\tests\fixtures\auth_failure_bundle.json
+```
+
+```powershell
+$bundle = Get-Content .\tests\fixtures\auth_failure_bundle.json -Raw | ConvertFrom-Json
+$body = @{
+  destination_name = "ticketing-demo"
+  event_type = "auth_failure.detected"
+  payload = $bundle
+} | ConvertTo-Json -Depth 20
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8000/webhooks/deliveries/preview `
+  -Headers @{ "Idempotency-Key" = "demo-webhook-auth-001" } `
+  -ContentType "application/json" `
+  -Body $body
 ```
