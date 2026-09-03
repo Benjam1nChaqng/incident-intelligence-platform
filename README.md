@@ -33,8 +33,9 @@ No real employer, customer, school, or client data belongs in this repository.
 5. Normalize authentication failure signals into incident evidence.
 6. Add GitHub Actions CI for pytest and Ruff.
 7. Add webhook delivery with retry state and duplicate suppression.
-8. Add deterministic incident classification and runbook draft interfaces.
-9. Add human approval flow before response drafts can be marked ready.
+8. Add deterministic incident classification and runbook draft interfaces with a human approval
+   boundary.
+9. Add approval persistence so reviewed response drafts can be accepted or rejected.
 10. Add Docker Compose, basic structured logs, and demo instructions.
 11. Refresh the case study and truthful resume bullets every seventh completed checkpoint.
 
@@ -48,9 +49,9 @@ python -m ruff check .
 
 ## Current Checkpoint
 
-Checkpoint 7 adds a deterministic webhook delivery boundary. The preview endpoint records outbound
-delivery state, suppresses duplicate idempotency keys, and marks transient HTTP failures as
-retryable without calling any external service.
+Checkpoint 8 adds deterministic incident classification and a runbook draft preview. Drafted
+operator guidance is always returned as `pending_human_approval`, so the API demonstrates an
+AI-adjacent support workflow without sending responses or updating external systems.
 
 ```powershell
 Invoke-RestMethod `
@@ -74,4 +75,12 @@ Invoke-RestMethod `
   -Headers @{ "Idempotency-Key" = "demo-webhook-auth-001" } `
   -ContentType "application/json" `
   -Body $body
+```
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8000/investigations/runbook-draft-preview `
+  -ContentType "application/json" `
+  -InFile .\tests\fixtures\auth_failure_bundle.json
 ```

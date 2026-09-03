@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from incident_intel import __version__
 from incident_intel.auth_failures import AuthFailureEvidence, extract_auth_failure_evidence
 from incident_intel.ingestion import InMemoryIngestionStore
+from incident_intel.runbooks import RunbookDraft, draft_runbook_response
 from incident_intel.schemas import EventBundle
 from incident_intel.webhooks import (
     InMemoryWebhookDeliveryStore,
@@ -72,6 +73,11 @@ def ingest_event_bundle(
 @app.post("/investigations/auth-failure-preview", response_model=AuthFailureEvidence)
 def preview_auth_failure_evidence(bundle: EventBundle) -> AuthFailureEvidence:
     return extract_auth_failure_evidence(bundle)
+
+
+@app.post("/investigations/runbook-draft-preview", response_model=RunbookDraft)
+def preview_runbook_draft(bundle: EventBundle) -> RunbookDraft:
+    return draft_runbook_response(bundle)
 
 
 @app.post("/webhooks/deliveries/preview", response_model=WebhookDeliveryRecord, status_code=201)
