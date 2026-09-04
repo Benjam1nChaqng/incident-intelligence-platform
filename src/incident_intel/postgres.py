@@ -1,11 +1,20 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Engine, and_, create_engine, insert, or_, select
+from sqlalchemy import Engine, and_, create_engine, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from incident_intel.db import event_ingestions, evidence_events, incidents, support_tickets
+from incident_intel.classification import ClassificationResult
+from incident_intel.db import (
+    classifications,
+    event_ingestions,
+    evidence_events,
+    incidents,
+    outbox_jobs,
+    support_tickets,
+)
 from incident_intel.incidents import (
     EvidenceDetail,
     IncidentDetail,
@@ -22,6 +31,13 @@ from incident_intel.ingestion import (
     StorageIntegrityError,
     StorageUnavailable,
     bundle_payload_hash,
+)
+from incident_intel.jobs import (
+    InvalidJobState,
+    JobNotFound,
+    JobRecord,
+    retry_delay,
+    utc_now,
 )
 from incident_intel.schemas import EventBundle
 
@@ -241,6 +257,218 @@ class PostgresIncidentRepository:
             status=row["status"],
             priority=row["priority"],
             summary=row["summary"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass(frozen=True)
+class PostgresJobRepository:
+    engine: Engine
+
+    def create_classification_job(
+        self,
+        incident_id: UUID,
+        *,
+        max_attempts: int = 3,
+    ) -> JobRecord:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        job_id = uuid4()
+        try:
+            with self.engine.begin() as connection:
+                exists = connection.execute(
+                    select(incidents.c.id).where(incidents.c.id == incident_id)
+                ).scalar_one_or_none()
+                if exists is None:
+                    raise JobNotFound
+                row = connection.execute(
+                    insert(outbox_jobs)
+                    .values(
+                        id=job_id,
+                        incident_id=incident_id,
+                        job_type="classify_incident",
+                        payload={},
+                        max_attempts=max_attempts,
+                    )
+                    .returning(outbox_jobs)
+                ).mappings().one()
+        except JobNotFound:
+            raise
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+        return self._job_from_row(row)
+
+    def get_job(self, job_id: UUID) -> JobRecord | None:
+        try:
+            with self.engine.connect() as connection:
+                row = connection.execute(
+                    select(outbox_jobs).where(outbox_jobs.c.id == job_id)
+                ).mappings().one_or_none()
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+        return None if row is None else self._job_from_row(row)
+
+    def claim_jobs(
+        self,
+        *,
+        worker_id: str,
+        limit: int = 10,
+        now: datetime | None = None,
+    ) -> tuple[JobRecord, ...]:
+        if not worker_id or len(worker_id) > 80:
+            raise ValueError("worker_id must contain 1 to 80 characters")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        claimed_at = now or utc_now()
+        try:
+            with self.engine.begin() as connection:
+                job_ids = connection.execute(
+                    select(outbox_jobs.c.id)
+                    .where(
+                        outbox_jobs.c.state.in_(("pending", "retry_pending")),
+                        outbox_jobs.c.next_attempt_at <= claimed_at,
+                    )
+                    .order_by(outbox_jobs.c.next_attempt_at, outbox_jobs.c.created_at)
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                ).scalars().all()
+                if not job_ids:
+                    return ()
+                rows = connection.execute(
+                    update(outbox_jobs)
+                    .where(outbox_jobs.c.id.in_(job_ids))
+                    .values(
+                        state="processing",
+                        attempt_count=outbox_jobs.c.attempt_count + 1,
+                        claimed_at=claimed_at,
+                        claimed_by=worker_id,
+                        updated_at=claimed_at,
+                    )
+                    .returning(outbox_jobs)
+                ).mappings().all()
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+        return tuple(self._job_from_row(row) for row in rows)
+
+    def fail_job(
+        self,
+        job_id: UUID,
+        error_class: str,
+        *,
+        retryable: bool,
+        now: datetime | None = None,
+    ) -> JobRecord:
+        failed_at = now or utc_now()
+        safe_error = error_class[:80] or "UnknownError"
+        try:
+            with self.engine.begin() as connection:
+                current = connection.execute(
+                    select(outbox_jobs)
+                    .where(outbox_jobs.c.id == job_id)
+                    .with_for_update()
+                ).mappings().one_or_none()
+                if current is None:
+                    raise JobNotFound
+                if current["state"] != "processing":
+                    raise InvalidJobState
+                should_retry = retryable and current["attempt_count"] < current["max_attempts"]
+                next_attempt_at = (
+                    failed_at + retry_delay(current["attempt_count"])
+                    if should_retry
+                    else current["next_attempt_at"]
+                )
+                row = connection.execute(
+                    update(outbox_jobs)
+                    .where(outbox_jobs.c.id == job_id)
+                    .values(
+                        state="retry_pending" if should_retry else "failed",
+                        next_attempt_at=next_attempt_at,
+                        claimed_at=None,
+                        claimed_by=None,
+                        last_error_class=safe_error,
+                        updated_at=failed_at,
+                    )
+                    .returning(outbox_jobs)
+                ).mappings().one()
+        except (InvalidJobState, JobNotFound):
+            raise
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+        return self._job_from_row(row)
+
+    def complete_classification(
+        self,
+        job_id: UUID,
+        result: ClassificationResult,
+        *,
+        now: datetime | None = None,
+    ) -> JobRecord:
+        completed_at = now or utc_now()
+        result_id = uuid4()
+        try:
+            with self.engine.begin() as connection:
+                current = connection.execute(
+                    select(outbox_jobs)
+                    .where(outbox_jobs.c.id == job_id)
+                    .with_for_update()
+                ).mappings().one_or_none()
+                if current is None:
+                    raise JobNotFound
+                if current["state"] == "completed":
+                    return self._job_from_row(current)
+                if current["state"] != "processing":
+                    raise InvalidJobState
+                connection.execute(
+                    insert(classifications).values(
+                        id=result_id,
+                        incident_id=current["incident_id"],
+                        provider=result.provider,
+                        category=result.category,
+                        confidence=result.confidence,
+                        cited_evidence_ids=list(result.cited_evidence_ids),
+                        reason_codes=list(result.reason_codes),
+                        explanation=result.explanation,
+                        model_version=result.model_version,
+                        prompt_version=result.prompt_version,
+                        latency_ms=result.latency_ms,
+                    )
+                )
+                row = connection.execute(
+                    update(outbox_jobs)
+                    .where(outbox_jobs.c.id == job_id)
+                    .values(
+                        state="completed",
+                        completed_at=completed_at,
+                        result_id=result_id,
+                        claimed_at=None,
+                        claimed_by=None,
+                        last_error_class=None,
+                        updated_at=completed_at,
+                    )
+                    .returning(outbox_jobs)
+                ).mappings().one()
+        except (InvalidJobState, JobNotFound):
+            raise
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+        return self._job_from_row(row)
+
+    @staticmethod
+    def _job_from_row(row) -> JobRecord:
+        return JobRecord(
+            job_id=row["id"],
+            incident_id=row["incident_id"],
+            job_type=row["job_type"],
+            state=row["state"],
+            attempt_count=row["attempt_count"],
+            max_attempts=row["max_attempts"],
+            next_attempt_at=row["next_attempt_at"],
+            claimed_at=row["claimed_at"],
+            claimed_by=row["claimed_by"],
+            completed_at=row["completed_at"],
+            result_id=row["result_id"],
+            last_error_class=row["last_error_class"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

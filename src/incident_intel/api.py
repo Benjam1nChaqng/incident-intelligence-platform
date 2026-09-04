@@ -26,9 +26,11 @@ from incident_intel.ingestion import (
     StorageIntegrityError,
     StorageUnavailable,
 )
+from incident_intel.jobs import JobNotFound, JobRecord, JobRepository
 from incident_intel.postgres import (
     PostgresIncidentRepository,
     PostgresIngestionStore,
+    PostgresJobRepository,
     create_engine_from_url,
 )
 from incident_intel.runbooks import RunbookDraft, draft_runbook_response
@@ -71,15 +73,22 @@ def _resolve_ingestion_store(
     settings: Settings | None,
     ingestion_store: IngestionStore | None,
     incident_repository: IncidentRepository | None,
-) -> tuple[IngestionStore, IncidentRepository, Engine | None]:
+    job_repository: JobRepository | None,
+) -> tuple[IngestionStore, IncidentRepository, JobRepository | None, Engine | None]:
     if ingestion_store is not None:
-        return ingestion_store, incident_repository or EmptyIncidentRepository(), None
+        return (
+            ingestion_store,
+            incident_repository or EmptyIncidentRepository(),
+            job_repository,
+            None,
+        )
 
     resolved_settings = settings if settings is not None else Settings.from_env()
     if resolved_settings.storage_backend == "memory":
         return (
             InMemoryIngestionStore(),
             incident_repository or EmptyIncidentRepository(),
+            job_repository,
             None,
         )
 
@@ -89,6 +98,7 @@ def _resolve_ingestion_store(
     return (
         PostgresIngestionStore(engine),
         incident_repository or PostgresIncidentRepository(engine),
+        job_repository or PostgresJobRepository(engine),
         engine,
     )
 
@@ -98,9 +108,20 @@ def create_app(
     settings: Settings | None = None,
     ingestion_store: IngestionStore | None = None,
     incident_repository: IncidentRepository | None = None,
+    job_repository: JobRepository | None = None,
 ) -> FastAPI:
-    resolved_ingestion_store, resolved_incident_repository, owned_engine = (
-        _resolve_ingestion_store(settings, ingestion_store, incident_repository)
+    (
+        resolved_ingestion_store,
+        resolved_incident_repository,
+        resolved_job_repository,
+        owned_engine,
+    ) = (
+        _resolve_ingestion_store(
+            settings,
+            ingestion_store,
+            incident_repository,
+            job_repository,
+        )
     )
     webhook_delivery_store = InMemoryWebhookDeliveryStore()
 
@@ -250,6 +271,91 @@ def create_app(
                 ),
             )
         return detail
+
+    @app.post(
+        "/incidents/{incident_id}/classifications",
+        response_model=JobRecord,
+        status_code=202,
+    )
+    def create_classification_job(incident_id: UUID) -> JobRecord | JSONResponse:
+        if resolved_job_repository is None:
+            return _problem_response(
+                503,
+                ProblemDetail(
+                    code="job_store_unavailable",
+                    detail="Durable jobs require the PostgreSQL storage backend.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        try:
+            if resolved_incident_repository.get_incident(incident_id) is None:
+                return _problem_response(
+                    404,
+                    ProblemDetail(
+                        code="incident_not_found",
+                        detail="The requested incident does not exist.",
+                        correlation_id=None,
+                        retryable=False,
+                    ),
+                )
+            return resolved_job_repository.create_classification_job(incident_id)
+        except JobNotFound:
+            return _problem_response(
+                404,
+                ProblemDetail(
+                    code="incident_not_found",
+                    detail="The requested incident does not exist.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        except StorageUnavailable:
+            return _problem_response(
+                503,
+                ProblemDetail(
+                    code="storage_unavailable",
+                    detail="The configured incident store is temporarily unavailable.",
+                    correlation_id=None,
+                    retryable=True,
+                ),
+            )
+
+    @app.get("/jobs/{job_id}", response_model=JobRecord)
+    def get_job(job_id: UUID) -> JobRecord | JSONResponse:
+        if resolved_job_repository is None:
+            return _problem_response(
+                503,
+                ProblemDetail(
+                    code="job_store_unavailable",
+                    detail="Durable jobs require the PostgreSQL storage backend.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        try:
+            job = resolved_job_repository.get_job(job_id)
+        except StorageUnavailable:
+            return _problem_response(
+                503,
+                ProblemDetail(
+                    code="storage_unavailable",
+                    detail="The configured incident store is temporarily unavailable.",
+                    correlation_id=None,
+                    retryable=True,
+                ),
+            )
+        if job is None:
+            return _problem_response(
+                404,
+                ProblemDetail(
+                    code="job_not_found",
+                    detail="The requested job does not exist.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        return job
 
     @app.post("/investigations/auth-failure-preview", response_model=AuthFailureEvidence)
     def preview_auth_failure_evidence(bundle: EventBundle) -> AuthFailureEvidence:
