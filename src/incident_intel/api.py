@@ -9,6 +9,22 @@ from pydantic import BaseModel
 from sqlalchemy import Engine
 
 from incident_intel import __version__
+from incident_intel.approvals import (
+    ApprovalRepository,
+    Decision,
+    DecisionRequest,
+    DraftNotFound,
+    DraftRecord,
+    DraftStateConflict,
+    build_response_draft,
+)
+from incident_intel.auth import (
+    InvalidToken,
+    OperatorClaims,
+    OperatorRole,
+    authorize,
+    verify_token,
+)
 from incident_intel.auth_failures import AuthFailureEvidence, extract_auth_failure_evidence
 from incident_intel.config import Settings
 from incident_intel.incidents import (
@@ -33,6 +49,7 @@ from incident_intel.postgres import (
     PostgresJobRepository,
     create_engine_from_url,
 )
+from incident_intel.postgres_approvals import PostgresApprovalRepository
 from incident_intel.runbooks import RunbookDraft, draft_runbook_response
 from incident_intel.schemas import EventBundle
 from incident_intel.webhooks import (
@@ -69,17 +86,61 @@ def _problem_response(status_code: int, problem: ProblemDetail) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=problem.model_dump())
 
 
+def _storage_unavailable() -> JSONResponse:
+    return _problem_response(
+        503,
+        ProblemDetail(
+            code="storage_unavailable",
+            detail="The configured incident store is temporarily unavailable.",
+            correlation_id=None,
+            retryable=True,
+        ),
+    )
+
+
+def _approval_unavailable() -> JSONResponse:
+    return _problem_response(
+        503,
+        ProblemDetail(
+            code="approval_store_unavailable",
+            detail="Durable approvals require the PostgreSQL storage backend.",
+            correlation_id=None,
+            retryable=False,
+        ),
+    )
+
+
+def _draft_not_found() -> JSONResponse:
+    return _problem_response(
+        404,
+        ProblemDetail(
+            code="draft_not_found",
+            detail="The requested response draft does not exist.",
+            correlation_id=None,
+            retryable=False,
+        ),
+    )
+
+
 def _resolve_ingestion_store(
     settings: Settings | None,
     ingestion_store: IngestionStore | None,
     incident_repository: IncidentRepository | None,
     job_repository: JobRepository | None,
-) -> tuple[IngestionStore, IncidentRepository, JobRepository | None, Engine | None]:
+    approval_repository: ApprovalRepository | None,
+) -> tuple[
+    IngestionStore,
+    IncidentRepository,
+    JobRepository | None,
+    ApprovalRepository | None,
+    Engine | None,
+]:
     if ingestion_store is not None:
         return (
             ingestion_store,
             incident_repository or EmptyIncidentRepository(),
             job_repository,
+            approval_repository,
             None,
         )
 
@@ -89,6 +150,7 @@ def _resolve_ingestion_store(
             InMemoryIngestionStore(),
             incident_repository or EmptyIncidentRepository(),
             job_repository,
+            approval_repository,
             None,
         )
 
@@ -99,6 +161,7 @@ def _resolve_ingestion_store(
         PostgresIngestionStore(engine),
         incident_repository or PostgresIncidentRepository(engine),
         job_repository or PostgresJobRepository(engine),
+        approval_repository or PostgresApprovalRepository(engine),
         engine,
     )
 
@@ -109,18 +172,24 @@ def create_app(
     ingestion_store: IngestionStore | None = None,
     incident_repository: IncidentRepository | None = None,
     job_repository: JobRepository | None = None,
+    approval_repository: ApprovalRepository | None = None,
 ) -> FastAPI:
+    resolved_settings = settings
+    if resolved_settings is None and ingestion_store is None:
+        resolved_settings = Settings.from_env()
     (
         resolved_ingestion_store,
         resolved_incident_repository,
         resolved_job_repository,
+        resolved_approval_repository,
         owned_engine,
     ) = (
         _resolve_ingestion_store(
-            settings,
+            resolved_settings,
             ingestion_store,
             incident_repository,
             job_repository,
+            approval_repository,
         )
     )
     webhook_delivery_store = InMemoryWebhookDeliveryStore()
@@ -139,6 +208,56 @@ def create_app(
         summary="Synthetic support incident investigation API.",
         lifespan=lifespan,
     )
+
+    def authenticate(
+        authorization: str | None,
+        *,
+        minimum_role: OperatorRole,
+    ) -> OperatorClaims | JSONResponse:
+        token_secret = resolved_settings.token_secret if resolved_settings else None
+        if token_secret is None:
+            return _problem_response(
+                503,
+                ProblemDetail(
+                    code="authorization_unavailable",
+                    detail="Operator authorization is not configured.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        if not authorization or not authorization.startswith("Bearer "):
+            return _problem_response(
+                401,
+                ProblemDetail(
+                    code="authentication_required",
+                    detail="A valid short-lived operator token is required.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        try:
+            claims = verify_token(authorization.removeprefix("Bearer "), secret=token_secret)
+        except InvalidToken:
+            return _problem_response(
+                401,
+                ProblemDetail(
+                    code="invalid_token",
+                    detail="The operator token is invalid or expired.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        if not authorize(claims, minimum_role=minimum_role):
+            return _problem_response(
+                403,
+                ProblemDetail(
+                    code="insufficient_role",
+                    detail="The operator role is not permitted to perform this action.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        return claims
 
     @app.get("/healthz", response_model=HealthResponse)
     def healthz() -> HealthResponse:
@@ -356,6 +475,114 @@ def create_app(
                 ),
             )
         return job
+
+    @app.post("/incidents/{incident_id}/drafts", response_model=DraftRecord, status_code=201)
+    def create_response_draft(
+        incident_id: UUID,
+        authorization: str | None = Header(default=None),
+    ) -> DraftRecord | JSONResponse:
+        operator = authenticate(authorization, minimum_role="operator")
+        if isinstance(operator, JSONResponse):
+            return operator
+        if resolved_approval_repository is None:
+            return _approval_unavailable()
+        try:
+            incident = resolved_incident_repository.get_incident(incident_id)
+            if incident is None:
+                return _problem_response(
+                    404,
+                    ProblemDetail(
+                        code="incident_not_found",
+                        detail="The requested incident does not exist.",
+                        correlation_id=None,
+                        retryable=False,
+                    ),
+                )
+            return resolved_approval_repository.create_draft(
+                incident_id,
+                content=build_response_draft(incident),
+                created_by=operator.operator_id,
+            )
+        except StorageUnavailable:
+            return _storage_unavailable()
+
+    @app.get("/drafts/{draft_id}", response_model=DraftRecord)
+    def get_response_draft(
+        draft_id: UUID,
+        authorization: str | None = Header(default=None),
+    ) -> DraftRecord | JSONResponse:
+        operator = authenticate(authorization, minimum_role="viewer")
+        if isinstance(operator, JSONResponse):
+            return operator
+        if resolved_approval_repository is None:
+            return _approval_unavailable()
+        try:
+            draft = resolved_approval_repository.get_draft(draft_id)
+        except StorageUnavailable:
+            return _storage_unavailable()
+        if draft is None:
+            return _draft_not_found()
+        return draft
+
+    def decide_response_draft(
+        draft_id: UUID,
+        *,
+        decision: Decision,
+        request: DecisionRequest,
+        authorization: str | None,
+    ) -> DraftRecord | JSONResponse:
+        operator = authenticate(authorization, minimum_role="operator")
+        if isinstance(operator, JSONResponse):
+            return operator
+        if resolved_approval_repository is None:
+            return _approval_unavailable()
+        try:
+            return resolved_approval_repository.decide(
+                draft_id,
+                decision=decision,
+                operator=operator,
+                reason=request.reason,
+            )
+        except DraftNotFound:
+            return _draft_not_found()
+        except DraftStateConflict:
+            return _problem_response(
+                409,
+                ProblemDetail(
+                    code="draft_already_decided",
+                    detail="The response draft already has a final operator decision.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        except StorageUnavailable:
+            return _storage_unavailable()
+
+    @app.post("/drafts/{draft_id}/approve", response_model=DraftRecord)
+    def approve_response_draft(
+        draft_id: UUID,
+        request: DecisionRequest | None = None,
+        authorization: str | None = Header(default=None),
+    ) -> DraftRecord | JSONResponse:
+        return decide_response_draft(
+            draft_id,
+            decision="approved",
+            request=request or DecisionRequest(),
+            authorization=authorization,
+        )
+
+    @app.post("/drafts/{draft_id}/reject", response_model=DraftRecord)
+    def reject_response_draft(
+        draft_id: UUID,
+        request: DecisionRequest | None = None,
+        authorization: str | None = Header(default=None),
+    ) -> DraftRecord | JSONResponse:
+        return decide_response_draft(
+            draft_id,
+            decision="rejected",
+            request=request or DecisionRequest(),
+            authorization=authorization,
+        )
 
     @app.post("/investigations/auth-failure-preview", response_model=AuthFailureEvidence)
     def preview_auth_failure_evidence(bundle: EventBundle) -> AuthFailureEvidence:
