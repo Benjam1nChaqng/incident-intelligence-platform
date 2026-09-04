@@ -9,8 +9,11 @@ authors = [
     { name = "Benjamin Chang" }
 ]
 dependencies = [
+    "alembic>=1.13,<2",
     "fastapi>=0.115",
     "pydantic>=2.8",
+    "psycopg[binary]>=3.2,<4",
+    "SQLAlchemy>=2.0,<3",
     "uvicorn[standard]>=0.30",
 ]
 
