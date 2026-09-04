@@ -10,9 +10,29 @@ permissions:
 
 jobs:
   test:
-    name: pytest and ruff
+    name: migrations, pytest, and ruff
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: incident_intel
+          POSTGRES_USER: incident_intel
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U incident_intel -d incident_intel"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      INCIDENT_INTEL_STORAGE_BACKEND: postgres
+      INCIDENT_INTEL_DATABASE_URL: postgresql+psycopg://incident_intel:ci-only-password@localhost:5432/incident_intel
+      INCIDENT_INTEL_TEST_DATABASE_URL: postgresql+psycopg://incident_intel:ci-only-password@localhost:5432/incident_intel
 
     steps:
       - name: Check out repository
@@ -26,6 +46,9 @@ jobs:
 
       - name: Install package
         run: python -m pip install -e ".[dev]"
+
+      - name: Apply database migrations
+        run: python -m alembic upgrade head
 
       - name: Run tests
         run: python -m pytest

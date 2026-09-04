@@ -1,86 +1,107 @@
 # Incident Intelligence Platform
 
-Synthetic support-ticket and log investigation platform for technical support engineering,
-AI-adjacent support, and junior software interviews.
+Incident Intelligence Platform is a synthetic support-operations backend built to demonstrate
+production-minded API and data engineering. It accepts a support ticket plus correlated log
+evidence, commits the complete incident to PostgreSQL in one transaction, and gives callers stable
+idempotency and conflict behavior.
 
-## Problem
+No real employer, customer, school, account, ticket, or log data belongs in this repository.
 
-Support teams often lose time stitching together tickets, authentication failures, logs,
-webhooks, retries, and previous investigations. This project demonstrates a small backend
-that can ingest synthetic support events, preserve an investigation history, classify incident
-patterns, and draft operator-facing responses behind a human approval gate.
+## What the current foundation proves
 
-No real employer, customer, school, or client data belongs in this repository.
+- Strict Pydantic validation for synthetic tickets and evidence events.
+- Deterministic SHA-256 hashing of validated JSON, independent of object key order.
+- Transactional PostgreSQL persistence across receipts, incidents, tickets, and evidence.
+- `201` for a new request, `200` for an exact duplicate, and stable `409` responses for key or
+  correlation conflicts.
+- Database-enforced concurrency: two simultaneous copies produce one accepted write and one
+  duplicate response.
+- Full rollback when any related ticket or evidence row violates a storage constraint.
+- Alembic-owned upgrade and downgrade history, plus PostgreSQL-backed CI tests.
+- Deterministic authentication-failure evidence and runbook-draft previews that remain behind a
+  human approval boundary.
 
-## Smallest Coherent Architecture
+## Durable local quick start
 
-- **API service:** Python 3.11+ with FastAPI and Pydantic.
-- **Storage target:** PostgreSQL for investigation history, initially abstracted behind tested
-  service functions so early checkpoints can run without a database.
-- **Incident pipeline:** synthetic ticket/log fixtures, idempotent ingestion, retry-aware webhook
-  delivery, and authentication failure normalization.
-- **AI boundary:** classifier and runbook draft interfaces with deterministic test doubles first,
-  real LLM calls only after secrets and approval gates are in place.
-- **Verification:** pytest and ruff locally and in GitHub Actions CI.
-- **Runtime:** Docker Compose once the API and PostgreSQL boundary are useful together.
-
-## Roadmap
-
-1. Initialize the service with health checks, project docs, lint, and tests.
-2. Add synthetic ticket and log schemas with fixture validation.
-3. Add an ingestion endpoint that deduplicates events by idempotency key.
-4. Persist investigation history in PostgreSQL through a repository boundary.
-5. Normalize authentication failure signals into incident evidence.
-6. Add GitHub Actions CI for pytest and Ruff.
-7. Add webhook delivery with retry state and duplicate suppression.
-8. Add deterministic incident classification and runbook draft interfaces with a human approval
-   boundary.
-9. Add approval persistence so reviewed response drafts can be accepted or rejected.
-10. Add Docker Compose, basic structured logs, and demo instructions.
-11. Refresh the case study and truthful resume bullets every seventh completed checkpoint.
-
-## Development
+Requirements: Python 3.11 or newer and Docker with Compose support.
 
 ```powershell
 python -m pip install -e ".[dev]"
+Copy-Item .env.example .env
+docker compose --env-file .env up -d postgres
+
+$env:INCIDENT_INTEL_STORAGE_BACKEND = "postgres"
+$env:INCIDENT_INTEL_DATABASE_URL = "postgresql+psycopg://incident_intel:local-development-only@localhost:54329/incident_intel"
+$env:INCIDENT_INTEL_TEST_DATABASE_URL = $env:INCIDENT_INTEL_DATABASE_URL
+
+python -m alembic upgrade head
+python -m uvicorn incident_intel.api:create_app --factory --reload
+```
+
+The values in `.env.example` are local-development-only placeholders. Use different credentials
+outside a disposable local environment and never commit a populated `.env` file.
+
+## Reproducible ingestion demo
+
+In a second PowerShell window, post the fixed synthetic fixture:
+
+```powershell
+$uri = "http://localhost:8000/events"
+$headers = @{ "Idempotency-Key" = "demo-auth-failure-001" }
+$fixture = Get-Content .\tests\fixtures\auth_failure_bundle.json -Raw
+
+$accepted = Invoke-WebRequest -Method Post -Uri $uri -Headers $headers `
+  -ContentType "application/json" -Body $fixture
+$accepted.StatusCode
+```
+
+The first response is `201`. Repeat the same request to prove safe retry behavior:
+
+```powershell
+$duplicate = Invoke-WebRequest -Method Post -Uri $uri -Headers $headers `
+  -ContentType "application/json" -Body $fixture
+$duplicate.StatusCode
+$duplicate.Content
+```
+
+The duplicate response is `200` with `"duplicate": true`. Now reuse the key with changed content:
+
+```powershell
+$changed = $fixture | ConvertFrom-Json
+$changed.ticket.subject = "Changed synthetic subject for the conflict demo"
+$changedBody = $changed | ConvertTo-Json -Depth 20
+
+try {
+  Invoke-WebRequest -Method Post -Uri $uri -Headers $headers `
+    -ContentType "application/json" -Body $changedBody
+} catch {
+  $_.Exception.Response.StatusCode.value__
+}
+```
+
+The deliberate conflict is `409`, and the original incident remains unchanged.
+
+## Verification
+
+With PostgreSQL running and `INCIDENT_INTEL_TEST_DATABASE_URL` set:
+
+```powershell
+python -m alembic downgrade base
+python -m alembic upgrade head
 python -m pytest
 python -m ruff check .
+git diff --check
 ```
 
-## Current Checkpoint
+Integration tests skip when the test database variable is absent. Unit and API tests still run.
+For an explicitly non-durable development process, set
+`INCIDENT_INTEL_STORAGE_BACKEND=memory`; the application never silently falls back to memory.
 
-Checkpoint 8 adds deterministic incident classification and a runbook draft preview. Drafted
-operator guidance is always returned as `pending_human_approval`, so the API demonstrates an
-AI-adjacent support workflow without sending responses or updating external systems.
+## Honest limitations
 
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:8000/investigations/auth-failure-preview `
-  -ContentType "application/json" `
-  -InFile .\tests\fixtures\auth_failure_bundle.json
-```
+The durable ingestion foundation is implemented. Background workers, authentication and
+authorization, persisted classification and approval decisions, real outbound delivery, optional
+GPT evaluation, production deployment, and operational dashboards are not implemented yet. The
+preview endpoints do not send messages or update external systems.
 
-```powershell
-$bundle = Get-Content .\tests\fixtures\auth_failure_bundle.json -Raw | ConvertFrom-Json
-$body = @{
-  destination_name = "ticketing-demo"
-  event_type = "auth_failure.detected"
-  payload = $bundle
-} | ConvertTo-Json -Depth 20
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:8000/webhooks/deliveries/preview `
-  -Headers @{ "Idempotency-Key" = "demo-webhook-auth-001" } `
-  -ContentType "application/json" `
-  -Body $body
-```
-
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:8000/investigations/runbook-draft-preview `
-  -ContentType "application/json" `
-  -InFile .\tests\fixtures\auth_failure_bundle.json
-```
+See [docs/architecture.md](docs/architecture.md) for the transaction and schema boundaries.
