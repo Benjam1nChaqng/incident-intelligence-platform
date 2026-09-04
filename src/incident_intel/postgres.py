@@ -1,11 +1,20 @@
 from dataclasses import dataclass
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from sqlalchemy import Engine, create_engine, insert, select
+from sqlalchemy import Engine, and_, create_engine, insert, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from incident_intel.db import event_ingestions, evidence_events, incidents, support_tickets
+from incident_intel.incidents import (
+    EvidenceDetail,
+    IncidentDetail,
+    IncidentPage,
+    IncidentSummary,
+    TicketDetail,
+    decode_incident_cursor,
+    encode_incident_cursor,
+)
 from incident_intel.ingestion import (
     CorrelationConflict,
     IdempotencyConflict,
@@ -125,4 +134,113 @@ class PostgresIngestionStore:
             correlation_id=str(summary["correlation_id"]),
             ticket_id=str(summary["ticket_id"]),
             log_count=int(summary["log_count"]),
+        )
+
+
+@dataclass(frozen=True)
+class PostgresIncidentRepository:
+    engine: Engine
+
+    def list_incidents(
+        self,
+        *,
+        limit: int = 20,
+        cursor: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+    ) -> IncidentPage:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+
+        conditions = []
+        if status is not None:
+            conditions.append(incidents.c.status == status)
+        if priority is not None:
+            conditions.append(incidents.c.priority == priority)
+        if cursor is not None:
+            position = decode_incident_cursor(cursor)
+            conditions.append(
+                or_(
+                    incidents.c.created_at < position.created_at,
+                    and_(
+                        incidents.c.created_at == position.created_at,
+                        incidents.c.id < position.incident_id,
+                    ),
+                )
+            )
+
+        statement = select(incidents)
+        if conditions:
+            statement = statement.where(and_(*conditions))
+        statement = statement.order_by(
+            incidents.c.created_at.desc(),
+            incidents.c.id.desc(),
+        ).limit(limit + 1)
+
+        try:
+            with self.engine.connect() as connection:
+                rows = connection.execute(statement).mappings().all()
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+
+        items = tuple(self._summary_from_row(row) for row in rows[:limit])
+        next_cursor = encode_incident_cursor(items[-1]) if len(rows) > limit else None
+        return IncidentPage(items=items, next_cursor=next_cursor)
+
+    def get_incident(self, incident_id: UUID) -> IncidentDetail | None:
+        try:
+            with self.engine.connect() as connection:
+                incident_row = connection.execute(
+                    select(incidents).where(incidents.c.id == incident_id)
+                ).mappings().one_or_none()
+                if incident_row is None:
+                    return None
+                ticket_row = connection.execute(
+                    select(support_tickets).where(support_tickets.c.incident_id == incident_id)
+                ).mappings().one()
+                evidence_rows = connection.execute(
+                    select(evidence_events)
+                    .where(evidence_events.c.incident_id == incident_id)
+                    .order_by(evidence_events.c.observed_at, evidence_events.c.event_id)
+                ).mappings().all()
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+
+        summary = self._summary_from_row(incident_row)
+        return IncidentDetail(
+            **summary.model_dump(),
+            ticket=TicketDetail(
+                ticket_id=ticket_row["ticket_id"],
+                subject=ticket_row["subject"],
+                description=ticket_row["description"],
+                priority=ticket_row["priority"],
+                source=ticket_row["source"],
+                requester_role=ticket_row["requester_role"],
+                created_at=ticket_row["created_at"],
+                tags=tuple(ticket_row["tags"]),
+            ),
+            evidence=tuple(
+                EvidenceDetail(
+                    event_id=row["event_id"],
+                    observed_at=row["observed_at"],
+                    service=row["service"],
+                    severity=row["severity"],
+                    message=row["message"],
+                    synthetic_user_id=row["synthetic_user_id"],
+                    attributes=row["attributes"],
+                )
+                for row in evidence_rows
+            ),
+        )
+
+    @staticmethod
+    def _summary_from_row(row) -> IncidentSummary:
+        return IncidentSummary(
+            incident_id=row["id"],
+            correlation_id=row["correlation_id"],
+            status=row["status"],
+            priority=row["priority"],
+            summary=row["summary"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )

@@ -1,8 +1,9 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
+from uuid import UUID
 
-from fastapi import FastAPI, Header, Response
+from fastapi import FastAPI, Header, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import Engine
@@ -10,6 +11,13 @@ from sqlalchemy import Engine
 from incident_intel import __version__
 from incident_intel.auth_failures import AuthFailureEvidence, extract_auth_failure_evidence
 from incident_intel.config import Settings
+from incident_intel.incidents import (
+    EmptyIncidentRepository,
+    IncidentDetail,
+    IncidentPage,
+    IncidentRepository,
+    InvalidCursor,
+)
 from incident_intel.ingestion import (
     CorrelationConflict,
     IdempotencyConflict,
@@ -18,7 +26,11 @@ from incident_intel.ingestion import (
     StorageIntegrityError,
     StorageUnavailable,
 )
-from incident_intel.postgres import PostgresIngestionStore, create_engine_from_url
+from incident_intel.postgres import (
+    PostgresIncidentRepository,
+    PostgresIngestionStore,
+    create_engine_from_url,
+)
 from incident_intel.runbooks import RunbookDraft, draft_runbook_response
 from incident_intel.schemas import EventBundle
 from incident_intel.webhooks import (
@@ -58,26 +70,38 @@ def _problem_response(status_code: int, problem: ProblemDetail) -> JSONResponse:
 def _resolve_ingestion_store(
     settings: Settings | None,
     ingestion_store: IngestionStore | None,
-) -> tuple[IngestionStore, Engine | None]:
+    incident_repository: IncidentRepository | None,
+) -> tuple[IngestionStore, IncidentRepository, Engine | None]:
     if ingestion_store is not None:
-        return ingestion_store, None
+        return ingestion_store, incident_repository or EmptyIncidentRepository(), None
 
     resolved_settings = settings if settings is not None else Settings.from_env()
     if resolved_settings.storage_backend == "memory":
-        return InMemoryIngestionStore(), None
+        return (
+            InMemoryIngestionStore(),
+            incident_repository or EmptyIncidentRepository(),
+            None,
+        )
 
     if resolved_settings.database_url is None:
         raise ValueError("INCIDENT_INTEL_DATABASE_URL is required for postgres storage")
     engine = create_engine_from_url(resolved_settings.database_url)
-    return PostgresIngestionStore(engine), engine
+    return (
+        PostgresIngestionStore(engine),
+        incident_repository or PostgresIncidentRepository(engine),
+        engine,
+    )
 
 
 def create_app(
     *,
     settings: Settings | None = None,
     ingestion_store: IngestionStore | None = None,
+    incident_repository: IncidentRepository | None = None,
 ) -> FastAPI:
-    resolved_ingestion_store, owned_engine = _resolve_ingestion_store(settings, ingestion_store)
+    resolved_ingestion_store, resolved_incident_repository, owned_engine = (
+        _resolve_ingestion_store(settings, ingestion_store, incident_repository)
+    )
     webhook_delivery_store = InMemoryWebhookDeliveryStore()
 
     @asynccontextmanager
@@ -165,6 +189,67 @@ def create_app(
             ticket_id=record.ticket_id,
             log_count=record.log_count,
         )
+
+    @app.get("/incidents", response_model=IncidentPage)
+    def list_incidents(
+        limit: int = Query(default=20, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=512),
+        status: str | None = Query(default=None, max_length=32),
+        priority: str | None = Query(default=None, max_length=16),
+    ) -> IncidentPage | JSONResponse:
+        try:
+            return resolved_incident_repository.list_incidents(
+                limit=limit,
+                cursor=cursor,
+                status=status,
+                priority=priority,
+            )
+        except InvalidCursor:
+            return _problem_response(
+                400,
+                ProblemDetail(
+                    code="invalid_cursor",
+                    detail="The incident cursor is invalid or expired.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        except StorageUnavailable:
+            return _problem_response(
+                503,
+                ProblemDetail(
+                    code="storage_unavailable",
+                    detail="The configured incident store is temporarily unavailable.",
+                    correlation_id=None,
+                    retryable=True,
+                ),
+            )
+
+    @app.get("/incidents/{incident_id}", response_model=IncidentDetail)
+    def get_incident(incident_id: UUID) -> IncidentDetail | JSONResponse:
+        try:
+            detail = resolved_incident_repository.get_incident(incident_id)
+        except StorageUnavailable:
+            return _problem_response(
+                503,
+                ProblemDetail(
+                    code="storage_unavailable",
+                    detail="The configured incident store is temporarily unavailable.",
+                    correlation_id=None,
+                    retryable=True,
+                ),
+            )
+        if detail is None:
+            return _problem_response(
+                404,
+                ProblemDetail(
+                    code="incident_not_found",
+                    detail="The requested incident does not exist.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        return detail
 
     @app.post("/investigations/auth-failure-preview", response_model=AuthFailureEvidence)
     def preview_auth_failure_evidence(bundle: EventBundle) -> AuthFailureEvidence:
