@@ -2,8 +2,10 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
+    Integer,
     MetaData,
     PrimaryKeyConstraint,
     String,
@@ -92,4 +94,75 @@ FOUNDATION_TABLES = (
     incidents,
     support_tickets,
     evidence_events,
+)
+
+classifications = Table(
+    "classifications",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column(
+        "incident_id",
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", name="fk_classifications_incident_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("provider", String(80), nullable=False),
+    Column("category", String(80), nullable=False),
+    Column("confidence", Float, nullable=False),
+    Column("cited_evidence_ids", JSONB, nullable=False),
+    Column("reason_codes", JSONB, nullable=False),
+    Column("explanation", Text, nullable=False),
+    Column("model_version", String(80), nullable=False),
+    Column("prompt_version", String(80), nullable=False),
+    Column("latency_ms", Float, nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=text("now()"), nullable=False),
+    PrimaryKeyConstraint("id", name="pk_classifications"),
+)
+Index(
+    "ix_classifications_incident_created_at",
+    classifications.c.incident_id,
+    classifications.c.created_at,
+)
+
+outbox_jobs = Table(
+    "outbox_jobs",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column(
+        "incident_id",
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", name="fk_outbox_jobs_incident_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("job_type", String(80), nullable=False),
+    Column("payload", JSONB, nullable=False),
+    Column("state", String(32), server_default=text("'pending'"), nullable=False),
+    Column("attempt_count", Integer, server_default=text("0"), nullable=False),
+    Column("max_attempts", Integer, server_default=text("3"), nullable=False),
+    Column(
+        "next_attempt_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    Column("claimed_at", DateTime(timezone=True), nullable=True),
+    Column("claimed_by", String(80), nullable=True),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    Column("result_id", UUID(as_uuid=True), nullable=True),
+    Column("last_error_class", String(80), nullable=True),
+    Column("created_at", DateTime(timezone=True), server_default=text("now()"), nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=text("now()"), nullable=False),
+    CheckConstraint(
+        "state IN ('pending', 'processing', 'retry_pending', 'completed', 'failed')",
+        name="ck_outbox_jobs_state",
+    ),
+    CheckConstraint("attempt_count >= 0", name="ck_outbox_jobs_attempt_count"),
+    CheckConstraint("max_attempts > 0", name="ck_outbox_jobs_max_attempts"),
+    PrimaryKeyConstraint("id", name="pk_outbox_jobs"),
+)
+Index(
+    "ix_outbox_jobs_claim",
+    outbox_jobs.c.state,
+    outbox_jobs.c.next_attempt_at,
+    outbox_jobs.c.created_at,
 )

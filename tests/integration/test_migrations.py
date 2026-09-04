@@ -6,8 +6,10 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
 FOUNDATION_TABLES = {
+    "classifications",
     "event_ingestions",
     "incidents",
+    "outbox_jobs",
     "support_tickets",
     "evidence_events",
 }
@@ -44,11 +46,21 @@ def test_foundation_migration_upgrades_downgrades_and_reupgrades(
     assert inspector.get_foreign_keys("evidence_events")[0]["name"] == (
         "fk_evidence_events_incident_id"
     )
+    assert inspector.get_foreign_keys("classifications")[0]["name"] == (
+        "fk_classifications_incident_id"
+    )
+    assert inspector.get_foreign_keys("outbox_jobs")[0]["name"] == (
+        "fk_outbox_jobs_incident_id"
+    )
     assert "uq_incidents_correlation_id" in index_names(database_engine, "incidents")
     assert "ix_support_tickets_incident_id" in index_names(database_engine, "support_tickets")
     assert "ix_evidence_events_incident_observed_at" in index_names(
         database_engine, "evidence_events"
     )
+    assert "ix_classifications_incident_created_at" in index_names(
+        database_engine, "classifications"
+    )
+    assert "ix_outbox_jobs_claim" in index_names(database_engine, "outbox_jobs")
 
     command.downgrade(config, "base")
 
