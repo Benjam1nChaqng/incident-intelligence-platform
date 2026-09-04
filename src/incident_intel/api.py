@@ -92,7 +92,7 @@ def create_app(
     def ingest_event_bundle(
         bundle: EventBundle,
         response: Response,
-        idempotency_key: str = Header(min_length=8),
+        idempotency_key: str = Header(min_length=8, max_length=200),
     ) -> IngestionResponse | JSONResponse:
         try:
             record, duplicate = resolved_ingestion_store.ingest(idempotency_key, bundle)

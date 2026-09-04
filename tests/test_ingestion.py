@@ -125,3 +125,16 @@ async def test_ingest_event_bundle_requires_idempotency_key(app) -> None:
         response = await client.post("/events", json=load_bundle())
 
     assert response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_ingest_event_bundle_rejects_key_larger_than_storage_column(app) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/events",
+            headers={"Idempotency-Key": "x" * 201},
+            json=load_bundle(),
+        )
+
+    assert response.status_code == 422

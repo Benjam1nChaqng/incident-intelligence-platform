@@ -36,6 +36,8 @@ class PostgresIngestionStore:
         response_summary = {
             "correlation_id": record.correlation_id,
             "idempotency_key": record.idempotency_key,
+            "status": "accepted",
+            "duplicate": False,
             "ticket_id": record.ticket_id,
             "log_count": record.log_count,
         }

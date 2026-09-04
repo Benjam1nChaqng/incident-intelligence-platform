@@ -82,6 +82,8 @@ def test_ingest_persists_complete_incident_transaction(database_engine: Engine) 
     assert receipt["response_summary"] == {
         "correlation_id": "INC-AUTH-0001",
         "idempotency_key": "fixture-auth-failure-001",
+        "status": "accepted",
+        "duplicate": False,
         "ticket_id": "TCK-1001",
         "log_count": 2,
     }

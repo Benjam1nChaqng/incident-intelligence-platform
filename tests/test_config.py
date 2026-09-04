@@ -40,3 +40,8 @@ def test_settings_reject_unknown_backend_without_echoing_value() -> None:
 
     assert "INCIDENT_INTEL_STORAGE_BACKEND" in str(error.value)
     assert unknown_value not in str(error.value)
+
+
+def test_settings_constructor_rejects_postgres_without_database_url() -> None:
+    with pytest.raises(ValueError, match="INCIDENT_INTEL_DATABASE_URL"):
+        Settings(storage_backend="postgres")

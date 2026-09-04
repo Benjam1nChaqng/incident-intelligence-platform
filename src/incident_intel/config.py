@@ -11,6 +11,12 @@ class Settings:
     storage_backend: StorageBackend
     database_url: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.storage_backend not in {"memory", "postgres"}:
+            raise ValueError("INCIDENT_INTEL_STORAGE_BACKEND must be memory or postgres")
+        if self.storage_backend == "postgres" and not self.database_url:
+            raise ValueError("INCIDENT_INTEL_DATABASE_URL is required for postgres storage")
+
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
         source = os.environ if environ is None else environ
