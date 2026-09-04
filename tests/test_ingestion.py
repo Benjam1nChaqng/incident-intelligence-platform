@@ -5,7 +5,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from incident_intel.api import app
 from incident_intel.ingestion import (
     CorrelationConflict,
     IdempotencyConflict,
@@ -75,7 +74,7 @@ def test_in_memory_store_rejects_correlation_id_under_different_key() -> None:
 
 
 @pytest.mark.anyio
-async def test_ingest_event_bundle_records_new_idempotency_key() -> None:
+async def test_ingest_event_bundle_records_new_idempotency_key(app) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.post(
@@ -96,7 +95,7 @@ async def test_ingest_event_bundle_records_new_idempotency_key() -> None:
 
 
 @pytest.mark.anyio
-async def test_ingest_event_bundle_deduplicates_repeated_idempotency_key() -> None:
+async def test_ingest_event_bundle_deduplicates_repeated_idempotency_key(app) -> None:
     payload = load_bundle()
     payload["correlation_id"] = "INC-AUTH-DUPLICATE"
     transport = httpx.ASGITransport(app=app)
@@ -120,7 +119,7 @@ async def test_ingest_event_bundle_deduplicates_repeated_idempotency_key() -> No
 
 
 @pytest.mark.anyio
-async def test_ingest_event_bundle_requires_idempotency_key() -> None:
+async def test_ingest_event_bundle_requires_idempotency_key(app) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.post("/events", json=load_bundle())

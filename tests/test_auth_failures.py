@@ -4,7 +4,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from incident_intel.api import app
 from incident_intel.auth_failures import extract_auth_failure_evidence
 from incident_intel.schemas import EventBundle
 
@@ -39,7 +38,7 @@ def test_extract_auth_failure_evidence_from_mfa_denial_and_lockout() -> None:
 
 
 @pytest.mark.anyio
-async def test_preview_auth_failure_evidence_endpoint_returns_json_summary() -> None:
+async def test_preview_auth_failure_evidence_endpoint_returns_json_summary(app) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.post("/investigations/auth-failure-preview", json=load_payload())

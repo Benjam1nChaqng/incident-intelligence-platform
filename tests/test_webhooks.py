@@ -4,7 +4,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from incident_intel.api import app
 from incident_intel.schemas import EventBundle
 from incident_intel.webhooks import (
     InMemoryWebhookDeliveryStore,
@@ -93,7 +92,7 @@ def test_record_webhook_delivery_marks_transient_failure_retryable() -> None:
 
 
 @pytest.mark.anyio
-async def test_webhook_preview_endpoint_returns_delivery_state() -> None:
+async def test_webhook_preview_endpoint_returns_delivery_state(app) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.post(

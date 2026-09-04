@@ -4,7 +4,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from incident_intel.api import app
 from incident_intel.runbooks import draft_runbook_response
 from incident_intel.schemas import EventBundle
 
@@ -43,7 +42,7 @@ def test_draft_runbook_response_requires_human_approval() -> None:
 
 
 @pytest.mark.anyio
-async def test_preview_runbook_draft_endpoint_returns_unapproved_draft() -> None:
+async def test_preview_runbook_draft_endpoint_returns_unapproved_draft(app) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.post("/investigations/runbook-draft-preview", json=load_payload())
