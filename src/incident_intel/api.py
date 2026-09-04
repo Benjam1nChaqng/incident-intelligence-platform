@@ -1,12 +1,16 @@
-from collections.abc import AsyncIterator
+import json
+import logging
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from time import perf_counter
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import FastAPI, Header, Query, Response
+from fastapi import FastAPI, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from incident_intel import __version__
 from incident_intel.approvals import (
@@ -43,6 +47,7 @@ from incident_intel.ingestion import (
     StorageUnavailable,
 )
 from incident_intel.jobs import JobNotFound, JobRecord, JobRepository
+from incident_intel.observability import MetricsRegistry, MetricsSnapshot
 from incident_intel.postgres import (
     PostgresIncidentRepository,
     PostgresIngestionStore,
@@ -66,6 +71,11 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class ReadinessResponse(BaseModel):
+    service: str
+    status: Literal["ready", "not_ready"]
+
+
 class IngestionResponse(BaseModel):
     correlation_id: str
     idempotency_key: str
@@ -84,6 +94,13 @@ class ProblemDetail(BaseModel):
 
 def _problem_response(status_code: int, problem: ProblemDetail) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=problem.model_dump())
+
+
+def _safe_request_id(value: str) -> bool:
+    return 1 <= len(value) <= 80 and all(
+        character.isascii() and (character.isalnum() or character in "-_.")
+        for character in value
+    )
 
 
 def _storage_unavailable() -> JSONResponse:
@@ -173,6 +190,8 @@ def create_app(
     incident_repository: IncidentRepository | None = None,
     job_repository: JobRepository | None = None,
     approval_repository: ApprovalRepository | None = None,
+    readiness_probe: Callable[[], bool] | None = None,
+    metrics: MetricsRegistry | None = None,
 ) -> FastAPI:
     resolved_settings = settings
     if resolved_settings is None and ingestion_store is None:
@@ -193,6 +212,28 @@ def create_app(
         )
     )
     webhook_delivery_store = InMemoryWebhookDeliveryStore()
+    metric_registry = metrics or MetricsRegistry()
+    request_logger = logging.getLogger("incident_intel.requests")
+    request_logger.disabled = False
+
+    if readiness_probe is None:
+        if owned_engine is None:
+
+            def always_ready() -> bool:
+                return True
+
+            readiness_probe = always_ready
+        else:
+
+            def database_ready() -> bool:
+                try:
+                    with owned_engine.connect() as connection:
+                        connection.execute(text("SELECT 1"))
+                    return True
+                except SQLAlchemyError:
+                    return False
+
+            readiness_probe = database_ready
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -208,6 +249,35 @@ def create_app(
         summary="Synthetic support incident investigation API.",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def log_request(request: Request, call_next):
+        started = perf_counter()
+        supplied_id = request.headers.get("x-request-id", "")
+        request_id = supplied_id if _safe_request_id(supplied_id) else str(uuid4())
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            latency_ms = (perf_counter() - started) * 1000
+            metric_registry.observe_request(latency_ms)
+            request_logger.info(
+                json.dumps(
+                    {
+                        "event": "http_request",
+                        "request_id": request_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status_code": status_code,
+                        "latency_ms": round(latency_ms, 3),
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
 
     def authenticate(
         authorization: str | None,
@@ -226,6 +296,7 @@ def create_app(
                 ),
             )
         if not authorization or not authorization.startswith("Bearer "):
+            metric_registry.increment("rejected")
             return _problem_response(
                 401,
                 ProblemDetail(
@@ -238,6 +309,7 @@ def create_app(
         try:
             claims = verify_token(authorization.removeprefix("Bearer "), secret=token_secret)
         except InvalidToken:
+            metric_registry.increment("rejected")
             return _problem_response(
                 401,
                 ProblemDetail(
@@ -248,6 +320,7 @@ def create_app(
                 ),
             )
         if not authorize(claims, minimum_role=minimum_role):
+            metric_registry.increment("rejected")
             return _problem_response(
                 403,
                 ProblemDetail(
@@ -267,6 +340,23 @@ def create_app(
             version=__version__,
         )
 
+    @app.get("/readyz", response_model=ReadinessResponse)
+    def readyz(response: Response) -> ReadinessResponse:
+        if not readiness_probe():
+            response.status_code = 503
+            return ReadinessResponse(
+                service="incident-intelligence-platform",
+                status="not_ready",
+            )
+        return ReadinessResponse(
+            service="incident-intelligence-platform",
+            status="ready",
+        )
+
+    @app.get("/metrics", response_model=MetricsSnapshot)
+    def metrics_snapshot() -> MetricsSnapshot:
+        return metric_registry.snapshot()
+
     @app.post("/events", response_model=IngestionResponse, status_code=201)
     def ingest_event_bundle(
         bundle: EventBundle,
@@ -276,6 +366,7 @@ def create_app(
         try:
             record, duplicate = resolved_ingestion_store.ingest(idempotency_key, bundle)
         except IdempotencyConflict:
+            metric_registry.increment("conflict")
             return _problem_response(
                 409,
                 ProblemDetail(
@@ -286,6 +377,7 @@ def create_app(
                 ),
             )
         except CorrelationConflict:
+            metric_registry.increment("conflict")
             return _problem_response(
                 409,
                 ProblemDetail(
@@ -296,6 +388,7 @@ def create_app(
                 ),
             )
         except StorageIntegrityError:
+            metric_registry.increment("conflict")
             return _problem_response(
                 409,
                 ProblemDetail(
@@ -320,6 +413,9 @@ def create_app(
 
         if duplicate:
             response.status_code = 200
+            metric_registry.increment("duplicate")
+        else:
+            metric_registry.increment("accepted")
 
         return IngestionResponse(
             correlation_id=record.correlation_id,
@@ -537,12 +633,14 @@ def create_app(
         if resolved_approval_repository is None:
             return _approval_unavailable()
         try:
-            return resolved_approval_repository.decide(
+            draft = resolved_approval_repository.decide(
                 draft_id,
                 decision=decision,
                 operator=operator,
                 reason=request.reason,
             )
+            metric_registry.increment(decision)
+            return draft
         except DraftNotFound:
             return _draft_not_found()
         except DraftStateConflict:
