@@ -40,6 +40,10 @@ class StorageUnavailable(Exception):  # noqa: N818 - public domain name from the
     """Raised when the configured durable store cannot complete an operation."""
 
 
+class StorageIntegrityError(Exception):
+    """Raised when validated input violates a durable storage constraint."""
+
+
 class IngestionStore(Protocol):
     def ingest(
         self, idempotency_key: str, bundle: EventBundle

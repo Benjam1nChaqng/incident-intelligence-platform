@@ -14,6 +14,7 @@ from incident_intel.ingestion import (
     InMemoryIngestionStore,
     StorageUnavailable,
 )
+from incident_intel.postgres import PostgresIngestionStore, create_engine_from_url
 from incident_intel.runbooks import RunbookDraft, draft_runbook_response
 from incident_intel.schemas import EventBundle
 from incident_intel.webhooks import (
@@ -61,7 +62,9 @@ def _resolve_ingestion_store(
     if resolved_settings.storage_backend == "memory":
         return InMemoryIngestionStore()
 
-    raise RuntimeError("postgres storage adapter is not available")
+    if resolved_settings.database_url is None:
+        raise ValueError("INCIDENT_INTEL_DATABASE_URL is required for postgres storage")
+    return PostgresIngestionStore(create_engine_from_url(resolved_settings.database_url))
 
 
 def create_app(
