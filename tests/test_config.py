@@ -1,3 +1,5 @@
+from secrets import token_urlsafe
+
 import pytest
 
 from incident_intel.config import Settings
@@ -15,6 +17,7 @@ def test_settings_accept_postgres_backend_with_database_url() -> None:
         {
             "INCIDENT_INTEL_STORAGE_BACKEND": "postgres",
             "INCIDENT_INTEL_DATABASE_URL": "postgresql+psycopg://demo:demo@localhost/demo",
+            "INCIDENT_INTEL_TOKEN_SECRET": token_urlsafe(32),
         }
     )
 
@@ -30,6 +33,16 @@ def test_settings_reject_missing_backend() -> None:
 def test_settings_reject_postgres_without_database_url() -> None:
     with pytest.raises(ValueError, match="INCIDENT_INTEL_DATABASE_URL"):
         Settings.from_env({"INCIDENT_INTEL_STORAGE_BACKEND": "postgres"})
+
+
+def test_settings_reject_postgres_without_token_secret() -> None:
+    with pytest.raises(ValueError, match="INCIDENT_INTEL_TOKEN_SECRET"):
+        Settings.from_env(
+            {
+                "INCIDENT_INTEL_STORAGE_BACKEND": "postgres",
+                "INCIDENT_INTEL_DATABASE_URL": "postgresql+psycopg://demo:demo@localhost/demo",
+            }
+        )
 
 
 def test_settings_reject_unknown_backend_without_echoing_value() -> None:

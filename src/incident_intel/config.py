@@ -13,6 +13,7 @@ StorageBackend = Literal["memory", "postgres"]
 class Settings:
     storage_backend: StorageBackend
     database_url: str | None = None
+    token_secret: str | None = None
 
     def __post_init__(self) -> None:
         if self.storage_backend not in {"memory", "postgres"}:
@@ -28,6 +29,8 @@ class Settings:
                 raise ValueError(
                     "INCIDENT_INTEL_DATABASE_URL must use the postgresql+psycopg driver"
                 )
+        if self.token_secret is not None and len(self.token_secret) < 32:
+            raise ValueError("INCIDENT_INTEL_TOKEN_SECRET must contain at least 32 characters")
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
@@ -42,8 +45,12 @@ class Settings:
         database_url = source.get("INCIDENT_INTEL_DATABASE_URL", "").strip() or None
         if backend == "postgres" and database_url is None:
             raise ValueError("INCIDENT_INTEL_DATABASE_URL is required for postgres storage")
+        token_secret = source.get("INCIDENT_INTEL_TOKEN_SECRET", "").strip() or None
+        if backend == "postgres" and token_secret is None:
+            raise ValueError("INCIDENT_INTEL_TOKEN_SECRET is required for postgres storage")
 
         return cls(
             storage_backend=cast(StorageBackend, backend),
             database_url=database_url if backend == "postgres" else None,
+            token_secret=token_secret if backend == "postgres" else None,
         )
