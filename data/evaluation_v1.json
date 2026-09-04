@@ -1,0 +1,90 @@
+{
+  "version": "evaluation-v1",
+  "description": "Synthetic held-out support evidence for deterministic classifier evaluation.",
+  "cases": [
+    {
+      "case_id": "auth-001",
+      "expected_category": "authentication_failure",
+      "service": "identity-provider",
+      "message": "Synthetic user denied an MFA challenge.",
+      "attributes": {"auth_method": "mfa_push", "result": "denied"}
+    },
+    {
+      "case_id": "auth-002",
+      "expected_category": "authentication_failure",
+      "service": "identity-provider",
+      "message": "Synthetic account entered lockout state.",
+      "attributes": {"lockout": true}
+    },
+    {
+      "case_id": "auth-003",
+      "expected_category": "authentication_failure",
+      "service": "identity-provider",
+      "message": "Synthetic sign in attempts exceeded policy.",
+      "attributes": {"failure_count": 4}
+    },
+    {
+      "case_id": "network-001",
+      "expected_category": "network_connectivity",
+      "service": "dns-resolver",
+      "message": "DNS lookup failed for a synthetic hostname.",
+      "attributes": {"result": "timeout"}
+    },
+    {
+      "case_id": "network-002",
+      "expected_category": "network_connectivity",
+      "service": "edge-router",
+      "message": "Network route is unreachable in the lab.",
+      "attributes": {"hop_count": 0}
+    },
+    {
+      "case_id": "network-003",
+      "expected_category": "network_connectivity",
+      "service": "access-switch",
+      "message": "Packet loss crossed the synthetic alert threshold.",
+      "attributes": {"packet_loss_percent": 20}
+    },
+    {
+      "case_id": "endpoint-001",
+      "expected_category": "endpoint_health",
+      "service": "endpoint-agent",
+      "message": "Endpoint disk health warning detected.",
+      "attributes": {"free_percent": 4}
+    },
+    {
+      "case_id": "endpoint-002",
+      "expected_category": "endpoint_health",
+      "service": "device-monitor",
+      "message": "Device CPU saturation remained above threshold.",
+      "attributes": {"cpu_percent": 98}
+    },
+    {
+      "case_id": "endpoint-003",
+      "expected_category": "endpoint_health",
+      "service": "antivirus-agent",
+      "message": "Endpoint protection service crash was detected.",
+      "attributes": {"restart_count": 3}
+    },
+    {
+      "case_id": "other-001",
+      "expected_category": "uncategorized",
+      "service": "business-application",
+      "message": "Synthetic user requested a general information update.",
+      "attributes": {"request_type": "information"}
+    },
+    {
+      "case_id": "other-002",
+      "expected_category": "uncategorized",
+      "service": "calendar-service",
+      "message": "Synthetic appointment label was updated successfully.",
+      "attributes": {"result": "ok"}
+    },
+    {
+      "case_id": "other-003",
+      "expected_category": "uncategorized",
+      "service": "inventory-service",
+      "message": "Synthetic asset description needs human review.",
+      "attributes": {"review": true}
+    }
+  ]
+}

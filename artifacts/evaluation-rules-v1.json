@@ -1,0 +1,40 @@
+{
+  "abstention_rate": 0.25,
+  "case_count": 12,
+  "citation_validity": 1.0,
+  "dataset_version": "evaluation-v1",
+  "macro_f1": 1.0,
+  "median_latency_ms": 0.02505,
+  "model_version": "rules-v1",
+  "p95_latency_ms": 0.2014,
+  "per_category": {
+    "authentication_failure": {
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "support": 3
+    },
+    "endpoint_health": {
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "support": 3
+    },
+    "network_connectivity": {
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "support": 3
+    },
+    "uncategorized": {
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "support": 3
+    }
+  },
+  "prompt_version": "none",
+  "provider": "deterministic_rules",
+  "run_timestamp": "2026-09-04T20:48:29.955037Z",
+  "unsupported_evidence_rate": 0.0
+}
