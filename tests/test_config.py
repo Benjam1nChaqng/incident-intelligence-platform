@@ -45,3 +45,21 @@ def test_settings_reject_unknown_backend_without_echoing_value() -> None:
 def test_settings_constructor_rejects_postgres_without_database_url() -> None:
     with pytest.raises(ValueError, match="INCIDENT_INTEL_DATABASE_URL"):
         Settings(storage_backend="postgres")
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "not a database URL",
+        "sqlite:///incident-intel.db",
+        "postgresql://incident_intel@localhost/incident_intel",
+    ],
+)
+def test_settings_rejects_unsupported_database_url_without_echoing_value(
+    database_url: str,
+) -> None:
+    with pytest.raises(ValueError) as error:
+        Settings(storage_backend="postgres", database_url=database_url)
+
+    assert "INCIDENT_INTEL_DATABASE_URL" in str(error.value)
+    assert database_url not in str(error.value)

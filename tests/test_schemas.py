@@ -84,3 +84,27 @@ def test_auth_failure_fixture_matches_event_bundle_schema() -> None:
 
     assert bundle.correlation_id == "INC-AUTH-0001"
     assert len(bundle.logs) == 2
+
+
+def test_support_ticket_rejects_naive_created_at() -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["ticket"]
+    payload["created_at"] = "2026-08-26T15:21:00"
+
+    with pytest.raises(ValidationError, match="created_at"):
+        SupportTicket.model_validate(payload)
+
+
+def test_log_event_rejects_naive_observed_at() -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["logs"][0]
+    payload["observed_at"] = "2026-08-26T15:22:04"
+
+    with pytest.raises(ValidationError, match="observed_at"):
+        LogEvent.model_validate(payload)
+
+
+def test_event_bundle_rejects_duplicate_evidence_ids() -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    payload["logs"][1]["event_id"] = payload["logs"][0]["event_id"]
+
+    with pytest.raises(ValidationError, match="event_id values must be unique"):
+        EventBundle.model_validate(payload)

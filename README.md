@@ -9,11 +9,11 @@ No real employer, customer, school, account, ticket, or log data belongs in this
 
 ## What the current foundation proves
 
-- Strict Pydantic validation for synthetic tickets and evidence events.
+- Strict Pydantic validation for synthetic tickets, timezone-aware evidence, and unique event IDs.
 - Deterministic SHA-256 hashing of validated JSON, independent of object key order.
 - Transactional PostgreSQL persistence across receipts, incidents, tickets, and evidence.
-- `201` for a new request, `200` for an exact duplicate, and stable `409` responses for key or
-  correlation conflicts.
+- `201` for a new request, `200` for an exact duplicate, and stable `409` responses for key,
+  correlation, ticket, or evidence-identity conflicts.
 - Database-enforced concurrency: two simultaneous copies produce one accepted write and one
   duplicate response.
 - Full rollback when any related ticket or evidence row violates a storage constraint.

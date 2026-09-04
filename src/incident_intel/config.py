@@ -3,6 +3,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
 
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+
 StorageBackend = Literal["memory", "postgres"]
 
 
@@ -16,6 +19,15 @@ class Settings:
             raise ValueError("INCIDENT_INTEL_STORAGE_BACKEND must be memory or postgres")
         if self.storage_backend == "postgres" and not self.database_url:
             raise ValueError("INCIDENT_INTEL_DATABASE_URL is required for postgres storage")
+        if self.storage_backend == "postgres":
+            try:
+                parsed_url = make_url(cast(str, self.database_url))
+            except ArgumentError:
+                raise ValueError("INCIDENT_INTEL_DATABASE_URL is invalid") from None
+            if parsed_url.drivername != "postgresql+psycopg":
+                raise ValueError(
+                    "INCIDENT_INTEL_DATABASE_URL must use the postgresql+psycopg driver"
+                )
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":

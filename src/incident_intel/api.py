@@ -1,8 +1,11 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, Header, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import Engine
 
 from incident_intel import __version__
 from incident_intel.auth_failures import AuthFailureEvidence, extract_auth_failure_evidence
@@ -12,6 +15,7 @@ from incident_intel.ingestion import (
     IdempotencyConflict,
     IngestionStore,
     InMemoryIngestionStore,
+    StorageIntegrityError,
     StorageUnavailable,
 )
 from incident_intel.postgres import PostgresIngestionStore, create_engine_from_url
@@ -54,17 +58,18 @@ def _problem_response(status_code: int, problem: ProblemDetail) -> JSONResponse:
 def _resolve_ingestion_store(
     settings: Settings | None,
     ingestion_store: IngestionStore | None,
-) -> IngestionStore:
+) -> tuple[IngestionStore, Engine | None]:
     if ingestion_store is not None:
-        return ingestion_store
+        return ingestion_store, None
 
     resolved_settings = settings if settings is not None else Settings.from_env()
     if resolved_settings.storage_backend == "memory":
-        return InMemoryIngestionStore()
+        return InMemoryIngestionStore(), None
 
     if resolved_settings.database_url is None:
         raise ValueError("INCIDENT_INTEL_DATABASE_URL is required for postgres storage")
-    return PostgresIngestionStore(create_engine_from_url(resolved_settings.database_url))
+    engine = create_engine_from_url(resolved_settings.database_url)
+    return PostgresIngestionStore(engine), engine
 
 
 def create_app(
@@ -72,12 +77,22 @@ def create_app(
     settings: Settings | None = None,
     ingestion_store: IngestionStore | None = None,
 ) -> FastAPI:
-    resolved_ingestion_store = _resolve_ingestion_store(settings, ingestion_store)
+    resolved_ingestion_store, owned_engine = _resolve_ingestion_store(settings, ingestion_store)
     webhook_delivery_store = InMemoryWebhookDeliveryStore()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            if owned_engine is not None:
+                owned_engine.dispose()
+
     app = FastAPI(
         title="Incident Intelligence Platform",
         version=__version__,
         summary="Synthetic support incident investigation API.",
+        lifespan=lifespan,
     )
 
     @app.get("/healthz", response_model=HealthResponse)
@@ -112,6 +127,18 @@ def create_app(
                 ProblemDetail(
                     code="correlation_id_reused",
                     detail="Correlation ID is already associated with a different ingestion.",
+                    correlation_id=bundle.correlation_id,
+                    retryable=False,
+                ),
+            )
+        except StorageIntegrityError:
+            return _problem_response(
+                409,
+                ProblemDetail(
+                    code="storage_identity_reused",
+                    detail=(
+                        "A ticket or evidence identifier is already assigned to another incident."
+                    ),
                     correlation_id=bundle.correlation_id,
                     retryable=False,
                 ),

@@ -43,6 +43,7 @@ incident evidence ordered by observation time.
 | Same key and canonical payload | 200 | `duplicate` | Not applicable |
 | Same key, changed payload | 409 | `idempotency_key_reused` | No |
 | Different key, same correlation | 409 | `correlation_id_reused` | No |
+| Ticket or evidence ID already owned elsewhere | 409 | `storage_identity_reused` | No |
 | Database unavailable | 503 | `storage_unavailable` | Yes |
 
 Database engines hide bound statement parameters. Public storage errors do not include request

@@ -1,12 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event, Lock
 
 import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, func, select, text
+from sqlalchemy import Engine, event, func, select, text
 
 from incident_intel.api import create_app
 from incident_intel.config import Settings
@@ -154,15 +154,59 @@ def test_concurrent_same_key_ingestion_has_one_winner(database_engine: Engine) -
     store = PostgresIngestionStore(database_engine)
     bundle = load_bundle()
     barrier = Barrier(2)
+    first_receipt_inserted = Event()
+    second_receipt_attempting = Event()
+    attempt_lock = Lock()
+    attempt_count = 0
+
+    def is_receipt_insert(statement: str) -> bool:
+        return statement.lstrip().startswith("INSERT INTO event_ingestions")
+
+    def before_cursor_execute(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        nonlocal attempt_count
+        if not is_receipt_insert(statement):
+            return
+        with attempt_lock:
+            attempt_count += 1
+            if attempt_count == 2:
+                second_receipt_attempting.set()
+
+    def after_cursor_execute(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        if not is_receipt_insert(statement) or first_receipt_inserted.is_set():
+            return
+        first_receipt_inserted.set()
+        assert second_receipt_attempting.wait(timeout=5)
 
     def ingest_after_barrier():
         barrier.wait(timeout=5)
         return store.ingest("fixture-auth-failure-concurrent", bundle)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(ingest_after_barrier) for _ in range(2)]
-        results = [future.result(timeout=10) for future in futures]
+    event.listen(database_engine, "before_cursor_execute", before_cursor_execute)
+    event.listen(database_engine, "after_cursor_execute", after_cursor_execute)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(ingest_after_barrier) for _ in range(2)]
+            results = [future.result(timeout=10) for future in futures]
+    finally:
+        event.remove(database_engine, "before_cursor_execute", before_cursor_execute)
+        event.remove(database_engine, "after_cursor_execute", after_cursor_execute)
 
+    assert first_receipt_inserted.is_set()
+    assert second_receipt_attempting.is_set()
     records = [record for record, _duplicate in results]
     duplicates = [duplicate for _record, duplicate in results]
     assert sorted(duplicates) == [False, True]
@@ -181,15 +225,52 @@ async def test_create_app_selects_postgres_store(
     )
     transport = httpx.ASGITransport(app=app)
 
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.post(
-            "/events",
-            headers={"Idempotency-Key": "fixture-auth-failure-api"},
-            json=load_bundle().model_dump(mode="json"),
-        )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.post(
+                "/events",
+                headers={"Idempotency-Key": "fixture-auth-failure-api"},
+                json=load_bundle().model_dump(mode="json"),
+            )
 
     assert response.status_code == 201
     assert response.json()["status"] == "accepted"
+    assert foundation_counts(database_engine) == (1, 1, 1, 2)
+
+
+@pytest.mark.anyio
+async def test_api_maps_cross_incident_storage_identity_conflict(
+    database_url: str,
+    database_engine: Engine,
+) -> None:
+    app = create_app(settings=Settings(storage_backend="postgres", database_url=database_url))
+    first_payload = load_bundle().model_dump(mode="json")
+    conflicting_payload = load_bundle().model_dump(mode="json")
+    conflicting_payload["correlation_id"] = "INC-AUTH-0002"
+    conflicting_payload["logs"][0]["event_id"] = "LOG-3001"
+    conflicting_payload["logs"][1]["event_id"] = "LOG-3002"
+    transport = httpx.ASGITransport(app=app)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            await client.post(
+                "/events",
+                headers={"Idempotency-Key": "fixture-auth-failure-identity-first"},
+                json=first_payload,
+            )
+            response = await client.post(
+                "/events",
+                headers={"Idempotency-Key": "fixture-auth-failure-identity-second"},
+                json=conflicting_payload,
+            )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "storage_identity_reused",
+        "detail": "A ticket or evidence identifier is already assigned to another incident.",
+        "correlation_id": "INC-AUTH-0002",
+        "retryable": False,
+    }
     assert foundation_counts(database_engine) == (1, 1, 1, 2)
 
 
