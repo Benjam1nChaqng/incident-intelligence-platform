@@ -166,3 +166,61 @@ Index(
     outbox_jobs.c.next_attempt_at,
     outbox_jobs.c.created_at,
 )
+
+response_drafts = Table(
+    "response_drafts",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column(
+        "incident_id",
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", name="fk_response_drafts_incident_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("content", Text, nullable=False),
+    Column("status", String(32), server_default=text("'pending_review'"), nullable=False),
+    Column("created_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=text("now()"), nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=text("now()"), nullable=False),
+    CheckConstraint(
+        "status IN ('pending_review', 'approved', 'rejected')",
+        name="ck_response_drafts_status",
+    ),
+    PrimaryKeyConstraint("id", name="pk_response_drafts"),
+)
+Index(
+    "ix_response_drafts_incident_created_at",
+    response_drafts.c.incident_id,
+    response_drafts.c.created_at,
+)
+
+approval_decisions = Table(
+    "approval_decisions",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column(
+        "draft_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "response_drafts.id",
+            name="fk_approval_decisions_draft_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    ),
+    Column("decision", String(32), nullable=False),
+    Column("operator_id", String(80), nullable=False),
+    Column("operator_role", String(32), nullable=False),
+    Column("reason", String(500), nullable=True),
+    Column("created_at", DateTime(timezone=True), server_default=text("now()"), nullable=False),
+    CheckConstraint(
+        "decision IN ('approved', 'rejected')",
+        name="ck_approval_decisions_decision",
+    ),
+    CheckConstraint(
+        "operator_role IN ('operator', 'admin')",
+        name="ck_approval_decisions_operator_role",
+    ),
+    PrimaryKeyConstraint("id", name="pk_approval_decisions"),
+    UniqueConstraint("draft_id", name="uq_approval_decisions_draft_id"),
+)

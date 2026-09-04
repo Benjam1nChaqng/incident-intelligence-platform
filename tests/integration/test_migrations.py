@@ -10,6 +10,8 @@ FOUNDATION_TABLES = {
     "event_ingestions",
     "incidents",
     "outbox_jobs",
+    "response_drafts",
+    "approval_decisions",
     "support_tickets",
     "evidence_events",
 }
@@ -52,6 +54,12 @@ def test_foundation_migration_upgrades_downgrades_and_reupgrades(
     assert inspector.get_foreign_keys("outbox_jobs")[0]["name"] == (
         "fk_outbox_jobs_incident_id"
     )
+    assert inspector.get_foreign_keys("response_drafts")[0]["name"] == (
+        "fk_response_drafts_incident_id"
+    )
+    assert inspector.get_foreign_keys("approval_decisions")[0]["name"] == (
+        "fk_approval_decisions_draft_id"
+    )
     assert "uq_incidents_correlation_id" in index_names(database_engine, "incidents")
     assert "ix_support_tickets_incident_id" in index_names(database_engine, "support_tickets")
     assert "ix_evidence_events_incident_observed_at" in index_names(
@@ -61,6 +69,12 @@ def test_foundation_migration_upgrades_downgrades_and_reupgrades(
         database_engine, "classifications"
     )
     assert "ix_outbox_jobs_claim" in index_names(database_engine, "outbox_jobs")
+    assert "ix_response_drafts_incident_created_at" in index_names(
+        database_engine, "response_drafts"
+    )
+    assert "uq_approval_decisions_draft_id" in index_names(
+        database_engine, "approval_decisions"
+    )
 
     command.downgrade(config, "base")
 
