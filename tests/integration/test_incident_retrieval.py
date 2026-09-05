@@ -1,4 +1,5 @@
 from pathlib import Path
+from secrets import token_urlsafe
 from uuid import uuid4
 
 import httpx
@@ -8,12 +9,21 @@ from alembic.config import Config
 from sqlalchemy import Engine, text
 
 from incident_intel.api import create_app
+from incident_intel.auth import OperatorClaims, issue_token
 from incident_intel.config import Settings
 from incident_intel.incidents import InvalidCursor
 from incident_intel.postgres import PostgresIncidentRepository, PostgresIngestionStore
 from incident_intel.schemas import EventBundle
 
 FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "auth_failure_bundle.json"
+
+
+def viewer_headers(secret: str) -> dict[str, str]:
+    token = issue_token(
+        OperatorClaims(operator_id="synthetic-viewer-1", role="viewer"),
+        secret=secret,
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def bundle_for(index: int, *, priority: str = "high") -> EventBundle:
@@ -100,14 +110,24 @@ async def test_incident_api_lists_and_returns_detail(
     database_engine: Engine,
 ) -> None:
     PostgresIngestionStore(database_engine).ingest("fixture-api-detail", bundle_for(31))
-    app = create_app(settings=Settings(storage_backend="postgres", database_url=database_url))
+    secret = token_urlsafe(32)
+    app = create_app(
+        settings=Settings(
+            storage_backend="postgres",
+            database_url=database_url,
+            token_secret=secret,
+        )
+    )
+    headers = viewer_headers(secret)
     transport = httpx.ASGITransport(app=app)
 
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            list_response = await client.get("/incidents", params={"limit": 1})
+            list_response = await client.get(
+                "/incidents", params={"limit": 1}, headers=headers
+            )
             incident_id = list_response.json()["items"][0]["incident_id"]
-            detail_response = await client.get(f"/incidents/{incident_id}")
+            detail_response = await client.get(f"/incidents/{incident_id}", headers=headers)
 
     assert list_response.status_code == 200
     assert list_response.json()["next_cursor"] is None
@@ -120,13 +140,23 @@ async def test_incident_api_lists_and_returns_detail(
 async def test_incident_api_returns_stable_cursor_and_not_found_errors(
     database_url: str,
 ) -> None:
-    app = create_app(settings=Settings(storage_backend="postgres", database_url=database_url))
+    secret = token_urlsafe(32)
+    app = create_app(
+        settings=Settings(
+            storage_backend="postgres",
+            database_url=database_url,
+            token_secret=secret,
+        )
+    )
+    headers = viewer_headers(secret)
     transport = httpx.ASGITransport(app=app)
 
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            cursor_response = await client.get("/incidents", params={"cursor": "invalid"})
-            missing_response = await client.get(f"/incidents/{uuid4()}")
+            cursor_response = await client.get(
+                "/incidents", params={"cursor": "invalid"}, headers=headers
+            )
+            missing_response = await client.get(f"/incidents/{uuid4()}", headers=headers)
 
     assert cursor_response.status_code == 400
     assert cursor_response.json()["code"] == "invalid_cursor"

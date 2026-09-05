@@ -4,9 +4,9 @@
   "citation_validity": 1.0,
   "dataset_version": "evaluation-v1",
   "macro_f1": 1.0,
-  "median_latency_ms": 0.02505,
+  "median_latency_ms": 0.0302,
   "model_version": "rules-v1",
-  "p95_latency_ms": 0.2014,
+  "p95_latency_ms": 0.2161,
   "per_category": {
     "authentication_failure": {
       "f1": 1.0,
@@ -35,6 +35,6 @@
   },
   "prompt_version": "none",
   "provider": "deterministic_rules",
-  "run_timestamp": "2026-09-04T20:48:29.955037Z",
+  "run_timestamp": "2026-09-04T23:55:00.605688Z",
   "unsupported_evidence_rate": 0.0
 }

@@ -35,14 +35,15 @@ def test_settings_reject_postgres_without_database_url() -> None:
         Settings.from_env({"INCIDENT_INTEL_STORAGE_BACKEND": "postgres"})
 
 
-def test_settings_reject_postgres_without_token_secret() -> None:
-    with pytest.raises(ValueError, match="INCIDENT_INTEL_TOKEN_SECRET"):
-        Settings.from_env(
-            {
-                "INCIDENT_INTEL_STORAGE_BACKEND": "postgres",
-                "INCIDENT_INTEL_DATABASE_URL": "postgresql+psycopg://demo:demo@localhost/demo",
-            }
-        )
+def test_worker_settings_can_load_without_api_token_secret() -> None:
+    settings = Settings.from_env(
+        {
+            "INCIDENT_INTEL_STORAGE_BACKEND": "postgres",
+            "INCIDENT_INTEL_DATABASE_URL": "postgresql+psycopg://demo:demo@localhost/demo",
+        }
+    )
+
+    assert settings.token_secret is None
 
 
 def test_settings_reject_unknown_backend_without_echoing_value() -> None:

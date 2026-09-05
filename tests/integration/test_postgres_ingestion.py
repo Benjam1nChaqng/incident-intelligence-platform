@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from secrets import token_urlsafe
 from threading import Barrier, Event, Lock
 
 import httpx
@@ -221,7 +222,9 @@ async def test_create_app_selects_postgres_store(
     database_engine: Engine,
 ) -> None:
     app = create_app(
-        settings=Settings(storage_backend="postgres", database_url=database_url)
+        settings=Settings(
+            storage_backend="postgres", database_url=database_url, token_secret=token_urlsafe(32)
+        )
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -243,7 +246,11 @@ async def test_api_maps_cross_incident_storage_identity_conflict(
     database_url: str,
     database_engine: Engine,
 ) -> None:
-    app = create_app(settings=Settings(storage_backend="postgres", database_url=database_url))
+    app = create_app(
+        settings=Settings(
+            storage_backend="postgres", database_url=database_url, token_secret=token_urlsafe(32)
+        )
+    )
     first_payload = load_bundle().model_dump(mode="json")
     conflicting_payload = load_bundle().model_dump(mode="json")
     conflicting_payload["correlation_id"] = "INC-AUTH-0002"

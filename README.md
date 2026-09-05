@@ -1,107 +1,146 @@
 # Incident Intelligence Platform
 
 Incident Intelligence Platform is a synthetic support-operations backend built to demonstrate
-production-minded API and data engineering. It accepts a support ticket plus correlated log
-evidence, commits the complete incident to PostgreSQL in one transaction, and gives callers stable
-idempotency and conflict behavior.
+production-minded backend, platform, and applied-AI engineering. It accepts a support ticket plus
+log evidence, persists the incident atomically, classifies it in a durable worker, and keeps every
+draft behind an authenticated human approval decision.
 
-No real employer, customer, school, account, ticket, or log data belongs in this repository.
+No real employer, customer, school, account, ticket, or log data belongs in this repository. The
+project performs no external delivery and makes no paid model calls.
 
-## What the current foundation proves
+## What it proves
 
-- Strict Pydantic validation for synthetic tickets, timezone-aware evidence, and unique event IDs.
-- Deterministic SHA-256 hashing of validated JSON, independent of object key order.
-- Transactional PostgreSQL persistence across receipts, incidents, tickets, and evidence.
-- `201` for a new request, `200` for an exact duplicate, and stable `409` responses for key,
-  correlation, ticket, or evidence-identity conflicts.
-- Database-enforced concurrency: two simultaneous copies produce one accepted write and one
-  duplicate response.
-- Full rollback when any related ticket or evidence row violates a storage constraint.
-- Alembic-owned upgrade and downgrade history, plus PostgreSQL-backed CI tests.
-- Deterministic authentication-failure evidence and runbook-draft previews that remain behind a
-  human approval boundary.
+- Transactional PostgreSQL ingestion across idempotency receipts, incidents, tickets, and evidence.
+- Stable retry semantics: `201` accepted, `200` exact duplicate, and `409` changed-payload or
+  identity conflicts.
+- Database-enforced concurrency for both ingestion and `FOR UPDATE SKIP LOCKED` worker claims.
+- Cursor-paginated incident timelines with stable filters and ordered cited evidence.
+- A deterministic classifier with versioned synthetic evaluation data and reproducible metrics.
+- Durable jobs with expiring ownership leases, stale-worker fencing, retry backoff, terminal
+  failure, and replay-safe completion.
+- Short-lived HMAC-signed synthetic viewer, operator, and admin identities.
+- Persisted response drafts that can transition only once through an operator approval or rejection.
+- Privacy-safe JSON request logs, operation counters, and separate liveness and database readiness.
+- A non-root container image plus API, worker, migration, and PostgreSQL Compose services.
 
-## Durable local quick start
+## Container quick start
 
-Requirements: Python 3.11 or newer and Docker with Compose support.
+Requirements: Docker with Compose support, Python 3.12+, and PowerShell 7. Run these commands from
+the repository root in one terminal. The local demo below reuses the secret created here.
+
+```powershell
+Copy-Item .env.example .env
+$env:INCIDENT_INTEL_TOKEN_SECRET = [Convert]::ToBase64String(
+    [Security.Cryptography.RandomNumberGenerator]::GetBytes(48)
+)
+(Get-Content .env) -replace '^INCIDENT_INTEL_TOKEN_SECRET=.*$',
+    "INCIDENT_INTEL_TOKEN_SECRET=$env:INCIDENT_INTEL_TOKEN_SECRET" | Set-Content .env
+
+docker compose --env-file .env up --build --detach
+docker compose --env-file .env ps
+```
+
+The migration service must finish before the API and worker start. The API is ready when
+`http://localhost:8000/readyz` returns a response with `status` equal to `ready`. The image runs as an
+unprivileged `app` user. The token-secret placeholder in `.env.example` is intentionally empty;
+startup requires your generated value. Other values are disposable local placeholders. Never
+commit `.env`. Both published ports bind to `127.0.0.1`.
+
+This release assumes trusted local callers. `POST /events` and preview routes accept unauthenticated
+synthetic input; ingestion authentication, rate limiting, TLS, and enterprise identity integration
+are prerequisites for any network exposure. Protected investigation and approval routes enforce
+signed roles even in the local demo.
+
+## Run the deterministic demo
+
+Install the project locally so the script can run migrations and issue demo tokens:
 
 ```powershell
 python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-docker compose --env-file .env up -d postgres
-
-$env:INCIDENT_INTEL_STORAGE_BACKEND = "postgres"
-$env:INCIDENT_INTEL_DATABASE_URL = "postgresql+psycopg://incident_intel:local-development-only@localhost:54329/incident_intel"
-$env:INCIDENT_INTEL_TEST_DATABASE_URL = $env:INCIDENT_INTEL_DATABASE_URL
-
-python -m alembic upgrade head
-python -m uvicorn incident_intel.api:create_app --factory --reload
+$env:INCIDENT_INTEL_DATABASE_URL =
+    "postgresql+psycopg://incident_intel:local-development-only@localhost:54329/incident_intel"
+./scripts/demo.ps1
 ```
 
-The values in `.env.example` are local-development-only placeholders. Use different credentials
-outside a disposable local environment and never commit a populated `.env` file.
+The script uses fresh GUID-based synthetic identifiers, accepts only a loopback base URL, and
+does not print tokens. Clear `INCIDENT_INTEL_TEST_DATABASE_URL` before the demo; conflicting
+database targets are rejected before migration. It stops on any failed native command or assertion.
+It checks exact `201`,
+`200`, and `409` responses, the conflict code, original ticket preservation, ordered evidence
+content, a persisted classification and its citations, the initial `pending_review` draft, and the
+final stored `approved` decision from the named operator. Repeated runs leave separate synthetic
+incidents in the local database. The API and worker must be running and ready first.
 
-## Reproducible ingestion demo
+## API and roles
 
-In a second PowerShell window, post the fixed synthetic fixture:
+| Endpoint | Minimum role | Purpose |
+| --- | --- | --- |
+| `GET /healthz`, `GET /readyz`, `GET /metrics` | Public local operations | Process, database, and metrics evidence |
+| `POST /events` | Public, trusted loopback | Atomically ingest a synthetic event bundle |
+| `GET /incidents`, `GET /incidents/{id}` | Viewer | Retrieve paginated incidents and timelines |
+| `POST /incidents/{id}/classifications` | Operator | Enqueue a durable classification job |
+| `GET /jobs/{id}` | Viewer | Inspect job state and failure class |
+| `GET /classifications/{id}` | Viewer | Retrieve the saved result, evidence citations, and provenance |
+| `POST /jobs/{id}/retry` | Admin | Explicitly requeue a terminally failed job |
+| `POST /incidents/{id}/drafts` | Operator | Create a deterministic pending draft |
+| `GET /drafts/{id}` | Viewer | Review draft and decision state |
+| `POST /drafts/{id}/approve`, `POST /drafts/{id}/reject` | Operator | Record one final human decision |
+
+Capture a 15-minute local token after setting `INCIDENT_INTEL_TOKEN_SECRET`; do not paste it into
+logs, screenshots, or the repository:
 
 ```powershell
-$uri = "http://localhost:8000/events"
-$headers = @{ "Idempotency-Key" = "demo-auth-failure-001" }
-$fixture = Get-Content .\tests\fixtures\auth_failure_bundle.json -Raw
-
-$accepted = Invoke-WebRequest -Method Post -Uri $uri -Headers $headers `
-  -ContentType "application/json" -Body $fixture
-$accepted.StatusCode
+$viewerToken = python -m incident_intel.token --role viewer --operator-id synthetic-demo-viewer
+$operatorToken = python -m incident_intel.token --role operator --operator-id synthetic-demo-operator
 ```
 
-The first response is `201`. Repeat the same request to prove safe retry behavior:
+## Measured deterministic evaluation
 
 ```powershell
-$duplicate = Invoke-WebRequest -Method Post -Uri $uri -Headers $headers `
-  -ContentType "application/json" -Body $fixture
-$duplicate.StatusCode
-$duplicate.Content
+python -m incident_intel.evaluate `
+    --dataset data/evaluation_v1.json `
+    --output artifacts/evaluation-rules-v1.json
 ```
 
-The duplicate response is `200` with `"duplicate": true`. Now reuse the key with changed content:
-
-```powershell
-$changed = $fixture | ConvertFrom-Json
-$changed.ticket.subject = "Changed synthetic subject for the conflict demo"
-$changedBody = $changed | ConvertTo-Json -Depth 20
-
-try {
-  Invoke-WebRequest -Method Post -Uri $uri -Headers $headers `
-    -ContentType "application/json" -Body $changedBody
-} catch {
-  $_.Exception.Response.StatusCode.value__
-}
-```
-
-The deliberate conflict is `409`, and the original incident remains unchanged.
+The checked-in September 4, 2026 run contains 12 curated synthetic cases across four categories.
+It measured macro F1 `1.0`, citation validity `1.0`, abstention rate `0.25`, unsupported-evidence
+rate `0.0`, median latency `0.0302 ms`, and p95 latency `0.2161 ms`. Citation validity checks
+existing IDs and requires a nonempty citation set for non-abstaining predictions; it does not
+measure whether the evidence logically supports the explanation. This small designed dataset
+proves repeatability and contract behavior, not real-world generalization.
 
 ## Verification
 
-With PostgreSQL running and `INCIDENT_INTEL_TEST_DATABASE_URL` set:
+Use a disposable PostgreSQL 16 test database: integration tests create and drop schema objects.
+Set `INCIDENT_INTEL_TEST_DATABASE_URL` to that database, then run:
 
 ```powershell
-python -m alembic downgrade base
-python -m alembic upgrade head
 python -m pytest
 python -m ruff check .
 git diff --check
+docker build -t incident-intelligence-platform:local .
 ```
 
-Integration tests skip when the test database variable is absent. Unit and API tests still run.
-For an explicitly non-durable development process, set
-`INCIDENT_INTEL_STORAGE_BACKEND=memory`; the application never silently falls back to memory.
+Integration tests skip when the test database variable is absent. The application never silently
+falls back to memory; a backend must be selected explicitly. PostgreSQL runtime configuration also
+requires a local token secret.
+
+The final verification record is maintained in the [case study](docs/case-study.md). The local
+suite passed all 114 tests against PostgreSQL 16, including migrations and contention checks.
+A checked-in CI workflow is not evidence of a remote CI run. Docker Compose's single-command
+startup remains unverified on this Podman-only host; the packaged services and complete demo were
+verified with explicit prerequisite gates. The exact [WSL/Podman fallback](docs/local-verification.md)
+documents this distinction and the reproducible checks.
 
 ## Honest limitations
 
-The durable ingestion foundation is implemented. Background workers, authentication and
-authorization, persisted classification and approval decisions, real outbound delivery, optional
-GPT evaluation, production deployment, and operational dashboards are not implemented yet. The
-preview endpoints do not send messages or update external systems.
+- The classifier is deterministic. No GPT comparison is published and no model cost is claimed.
+- The evaluation set is small, curated, synthetic, and designed to exercise known rules.
+- HMAC tokens demonstrate authorization boundaries; they are not an enterprise identity provider.
+- Metrics are process-local and reset on restart. API `/metrics` does not aggregate the separate
+  worker's counters; there is no external dashboard or alerting.
+- There is no browser UI, real customer data, outbound connector, cloud deployment, or production
+  user traffic.
 
-See [docs/architecture.md](docs/architecture.md) for the transaction and schema boundaries.
+See [the architecture](docs/architecture.md) and [the case study](docs/case-study.md) for the design
+tradeoffs, measured evidence, and interview walkthrough.

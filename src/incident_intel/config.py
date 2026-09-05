@@ -46,8 +46,6 @@ class Settings:
         if backend == "postgres" and database_url is None:
             raise ValueError("INCIDENT_INTEL_DATABASE_URL is required for postgres storage")
         token_secret = source.get("INCIDENT_INTEL_TOKEN_SECRET", "").strip() or None
-        if backend == "postgres" and token_secret is None:
-            raise ValueError("INCIDENT_INTEL_TOKEN_SECRET is required for postgres storage")
 
         return cls(
             storage_backend=cast(StorageBackend, backend),

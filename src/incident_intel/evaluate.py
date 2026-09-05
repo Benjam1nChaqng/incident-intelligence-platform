@@ -149,8 +149,12 @@ def _category_metrics(
 
 
 def _citations_are_valid(bundle: EventBundle, result: ClassificationResult) -> bool:
+    """Check citation-ID existence and nonempty predictions, not semantic entailment."""
     evidence_ids = {log.event_id for log in bundle.logs}
-    return set(result.cited_evidence_ids).issubset(evidence_ids)
+    citation_ids = set(result.cited_evidence_ids)
+    if result.category != "uncategorized" and not citation_ids:
+        return False
+    return citation_ids.issubset(evidence_ids)
 
 
 def _rounded(value: float, *, digits: int = 4) -> float:

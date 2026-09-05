@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, Field
 
-from incident_intel.classification import ClassificationResult
+from incident_intel.classification import ClassificationRecord, ClassificationResult
 
 JobState = Literal["pending", "processing", "retry_pending", "completed", "failed"]
 
@@ -31,6 +31,7 @@ class JobRecord(BaseModel):
     next_attempt_at: AwareDatetime
     claimed_at: AwareDatetime | None
     claimed_by: str | None
+    claim_token: UUID | None = Field(exclude=True)
     completed_at: AwareDatetime | None
     result_id: UUID | None
     last_error_class: str | None
@@ -48,6 +49,10 @@ class JobRepository(Protocol):
 
     def get_job(self, job_id: UUID) -> JobRecord | None: ...
 
+    def get_classification(self, classification_id: UUID) -> ClassificationRecord | None: ...
+
+    def retry_job(self, job_id: UUID) -> JobRecord: ...
+
     def claim_jobs(
         self,
         *,
@@ -61,6 +66,7 @@ class JobRepository(Protocol):
         job_id: UUID,
         result: ClassificationResult,
         *,
+        claim_token: UUID,
         now: datetime | None = None,
     ) -> JobRecord: ...
 
@@ -69,13 +75,14 @@ class JobRepository(Protocol):
         job_id: UUID,
         error_class: str,
         *,
+        claim_token: UUID,
         retryable: bool,
         now: datetime | None = None,
     ) -> JobRecord: ...
 
 
 def retry_delay(attempt_count: int) -> timedelta:
-    seconds = min(300, 10 * (2 ** max(0, attempt_count - 1)))
+    seconds = min(300, 10 * (2 ** min(5, max(0, attempt_count - 1))))
     return timedelta(seconds=seconds)
 
 

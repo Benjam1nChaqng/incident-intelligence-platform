@@ -83,3 +83,20 @@ and every milestone ends with PostgreSQL integration tests plus Ruff.
 The local flagship is complete only when the approved design's ten acceptance checks are mapped to
 fresh evidence under `Verified`, `Staged`, or `Incomplete`, with no required item left incomplete.
 Deployment and push remain separate approval-gated decisions.
+
+## Execution record: September 4, 2026
+
+Tasks 1 through 6 are implemented for the local deterministic release. Final code review added
+attempt-specific claim tokens, forward-only migration 0004, service-level authorization,
+atomic approval snapshots, admin retry, persisted classification retrieval, worker outage recovery,
+and an assertion-driven demo with database-target checks. No paid model calls or real data were used.
+
+Final automated evidence: 114 tests passed against PostgreSQL 16 with no skips; Ruff and the
+whitespace diff check passed. The classifier evaluation was rerun after rejecting empty citations
+for non-abstaining predictions. Packaged services, migration, full demos, and database outage/recovery
+were verified with explicit prerequisite gates under WSL/Podman. The standard Docker Compose
+one-command path could not be tested on this host and is distinguished from the verified fallback.
+
+See `docs/case-study.md` for the measured acceptance map and `docs/local-verification.md` for the
+repeatable provider workaround. Remote CI, publishing, and Benji's own interview rehearsal remain
+staged; none is represented as a completed external action or assessed human skill.

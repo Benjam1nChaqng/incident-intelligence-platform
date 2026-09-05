@@ -29,6 +29,14 @@ def index_names(engine: Engine, table_name: str) -> set[str]:
     return {index["name"] for index in inspect(engine).get_indexes(table_name)}
 
 
+def foreign_key_names(engine: Engine, table_name: str) -> set[str]:
+    return {key["name"] for key in inspect(engine).get_foreign_keys(table_name)}
+
+
+def column_names(engine: Engine, table_name: str) -> set[str]:
+    return {column["name"] for column in inspect(engine).get_columns(table_name)}
+
+
 def test_foundation_migration_upgrades_downgrades_and_reupgrades(
     database_engine: Engine,
 ) -> None:
@@ -42,24 +50,26 @@ def test_foundation_migration_upgrades_downgrades_and_reupgrades(
     assert inspector.get_pk_constraint("incidents")["name"] == "pk_incidents"
     assert inspector.get_pk_constraint("support_tickets")["name"] == "pk_support_tickets"
     assert inspector.get_pk_constraint("evidence_events")["name"] == "pk_evidence_events"
-    assert inspector.get_foreign_keys("support_tickets")[0]["name"] == (
+    assert foreign_key_names(database_engine, "support_tickets") == {
         "fk_support_tickets_incident_id"
-    )
-    assert inspector.get_foreign_keys("evidence_events")[0]["name"] == (
+    }
+    assert foreign_key_names(database_engine, "evidence_events") == {
         "fk_evidence_events_incident_id"
-    )
-    assert inspector.get_foreign_keys("classifications")[0]["name"] == (
+    }
+    assert foreign_key_names(database_engine, "classifications") == {
         "fk_classifications_incident_id"
-    )
-    assert inspector.get_foreign_keys("outbox_jobs")[0]["name"] == (
-        "fk_outbox_jobs_incident_id"
-    )
-    assert inspector.get_foreign_keys("response_drafts")[0]["name"] == (
+    }
+    assert foreign_key_names(database_engine, "outbox_jobs") == {
+        "fk_outbox_jobs_incident_id",
+        "fk_outbox_jobs_result_id",
+    }
+    assert "claim_token" in column_names(database_engine, "outbox_jobs")
+    assert foreign_key_names(database_engine, "response_drafts") == {
         "fk_response_drafts_incident_id"
-    )
-    assert inspector.get_foreign_keys("approval_decisions")[0]["name"] == (
+    }
+    assert foreign_key_names(database_engine, "approval_decisions") == {
         "fk_approval_decisions_draft_id"
-    )
+    }
     assert "uq_incidents_correlation_id" in index_names(database_engine, "incidents")
     assert "ix_support_tickets_incident_id" in index_names(database_engine, "support_tickets")
     assert "ix_evidence_events_incident_observed_at" in index_names(
@@ -80,6 +90,18 @@ def test_foundation_migration_upgrades_downgrades_and_reupgrades(
 
     assert application_tables(database_engine) == set()
 
+    command.upgrade(config, "0003_operator_approvals")
+
+    assert "claim_token" not in column_names(database_engine, "outbox_jobs")
+    assert foreign_key_names(database_engine, "outbox_jobs") == {
+        "fk_outbox_jobs_incident_id"
+    }
+
     command.upgrade(config, "head")
 
     assert application_tables(database_engine) == FOUNDATION_TABLES
+    assert "claim_token" in column_names(database_engine, "outbox_jobs")
+    assert foreign_key_names(database_engine, "outbox_jobs") == {
+        "fk_outbox_jobs_incident_id",
+        "fk_outbox_jobs_result_id",
+    }

@@ -20,7 +20,6 @@ from incident_intel.approvals import (
     DraftNotFound,
     DraftRecord,
     DraftStateConflict,
-    build_response_draft,
 )
 from incident_intel.auth import (
     InvalidToken,
@@ -30,10 +29,12 @@ from incident_intel.auth import (
     verify_token,
 )
 from incident_intel.auth_failures import AuthFailureEvidence, extract_auth_failure_evidence
+from incident_intel.classification import ClassificationRecord
 from incident_intel.config import Settings
 from incident_intel.incidents import (
     EmptyIncidentRepository,
     IncidentDetail,
+    IncidentNotFound,
     IncidentPage,
     IncidentRepository,
     InvalidCursor,
@@ -46,7 +47,7 @@ from incident_intel.ingestion import (
     StorageIntegrityError,
     StorageUnavailable,
 )
-from incident_intel.jobs import JobNotFound, JobRecord, JobRepository
+from incident_intel.jobs import InvalidJobState, JobNotFound, JobRecord, JobRepository
 from incident_intel.observability import MetricsRegistry, MetricsSnapshot
 from incident_intel.postgres import (
     PostgresIncidentRepository,
@@ -57,6 +58,7 @@ from incident_intel.postgres import (
 from incident_intel.postgres_approvals import PostgresApprovalRepository
 from incident_intel.runbooks import RunbookDraft, draft_runbook_response
 from incident_intel.schemas import EventBundle
+from incident_intel.services import IncidentService
 from incident_intel.webhooks import (
     InMemoryWebhookDeliveryStore,
     WebhookDeliveryRecord,
@@ -196,6 +198,13 @@ def create_app(
     resolved_settings = settings
     if resolved_settings is None and ingestion_store is None:
         resolved_settings = Settings.from_env()
+    if (
+        ingestion_store is None
+        and resolved_settings is not None
+        and resolved_settings.storage_backend == "postgres"
+        and resolved_settings.token_secret is None
+    ):
+        raise ValueError("INCIDENT_INTEL_TOKEN_SECRET is required for the PostgreSQL API")
     (
         resolved_ingestion_store,
         resolved_incident_repository,
@@ -212,9 +221,15 @@ def create_app(
         )
     )
     webhook_delivery_store = InMemoryWebhookDeliveryStore()
+    service = IncidentService(
+        resolved_incident_repository, resolved_job_repository, resolved_approval_repository
+    )
     metric_registry = metrics or MetricsRegistry()
     request_logger = logging.getLogger("incident_intel.requests")
     request_logger.disabled = False
+    request_logger.setLevel(logging.INFO)
+    if not request_logger.handlers:
+        request_logger.addHandler(logging.StreamHandler())
 
     if readiness_probe is None:
         if owned_engine is None:
@@ -250,11 +265,40 @@ def create_app(
         lifespan=lifespan,
     )
 
+    @app.exception_handler(PermissionError)
+    async def permission_denied(_request: Request, _error: PermissionError) -> JSONResponse:
+        metric_registry.increment("rejected")
+        return _problem_response(
+            403,
+            ProblemDetail(
+                code="insufficient_role",
+                detail="The operator role is not permitted to perform this action.",
+                correlation_id=None,
+                retryable=False,
+            ),
+        )
+
+    @app.exception_handler(IncidentNotFound)
+    async def incident_not_found(_request: Request, _error: IncidentNotFound) -> JSONResponse:
+        return _problem_response(
+            404,
+            ProblemDetail(
+                code="incident_not_found",
+                detail="The requested incident does not exist.",
+                correlation_id=None,
+                retryable=False,
+            ),
+        )
+
     @app.middleware("http")
     async def log_request(request: Request, call_next):
         started = perf_counter()
         supplied_id = request.headers.get("x-request-id", "")
         request_id = supplied_id if _safe_request_id(supplied_id) else str(uuid4())
+        supplied_correlation = request.headers.get("x-correlation-id", "")
+        correlation_id = (
+            supplied_correlation if _safe_request_id(supplied_correlation) else None
+        )
         status_code = 500
         try:
             response = await call_next(request)
@@ -269,8 +313,9 @@ def create_app(
                     {
                         "event": "http_request",
                         "request_id": request_id,
+                        "correlation_id": correlation_id,
                         "method": request.method,
-                        "path": request.url.path,
+                        "path": getattr(request.scope.get("route"), "path", "unmatched"),
                         "status_code": status_code,
                         "latency_ms": round(latency_ms, 3),
                     },
@@ -432,9 +477,14 @@ def create_app(
         cursor: str | None = Query(default=None, max_length=512),
         status: str | None = Query(default=None, max_length=32),
         priority: str | None = Query(default=None, max_length=16),
+        authorization: str | None = Header(default=None),
     ) -> IncidentPage | JSONResponse:
+        operator = authenticate(authorization, minimum_role="viewer")
+        if isinstance(operator, JSONResponse):
+            return operator
         try:
-            return resolved_incident_repository.list_incidents(
+            return service.list_incidents(
+                operator,
                 limit=limit,
                 cursor=cursor,
                 status=status,
@@ -462,9 +512,15 @@ def create_app(
             )
 
     @app.get("/incidents/{incident_id}", response_model=IncidentDetail)
-    def get_incident(incident_id: UUID) -> IncidentDetail | JSONResponse:
+    def get_incident(
+        incident_id: UUID,
+        authorization: str | None = Header(default=None),
+    ) -> IncidentDetail | JSONResponse:
+        operator = authenticate(authorization, minimum_role="viewer")
+        if isinstance(operator, JSONResponse):
+            return operator
         try:
-            detail = resolved_incident_repository.get_incident(incident_id)
+            detail = service.get_incident(operator, incident_id)
         except StorageUnavailable:
             return _problem_response(
                 503,
@@ -492,7 +548,13 @@ def create_app(
         response_model=JobRecord,
         status_code=202,
     )
-    def create_classification_job(incident_id: UUID) -> JobRecord | JSONResponse:
+    def create_classification_job(
+        incident_id: UUID,
+        authorization: str | None = Header(default=None),
+    ) -> JobRecord | JSONResponse:
+        operator = authenticate(authorization, minimum_role="operator")
+        if isinstance(operator, JSONResponse):
+            return operator
         if resolved_job_repository is None:
             return _problem_response(
                 503,
@@ -504,17 +566,7 @@ def create_app(
                 ),
             )
         try:
-            if resolved_incident_repository.get_incident(incident_id) is None:
-                return _problem_response(
-                    404,
-                    ProblemDetail(
-                        code="incident_not_found",
-                        detail="The requested incident does not exist.",
-                        correlation_id=None,
-                        retryable=False,
-                    ),
-                )
-            return resolved_job_repository.create_classification_job(incident_id)
+            return service.create_classification_job(operator, incident_id)
         except JobNotFound:
             return _problem_response(
                 404,
@@ -537,7 +589,13 @@ def create_app(
             )
 
     @app.get("/jobs/{job_id}", response_model=JobRecord)
-    def get_job(job_id: UUID) -> JobRecord | JSONResponse:
+    def get_job(
+        job_id: UUID,
+        authorization: str | None = Header(default=None),
+    ) -> JobRecord | JSONResponse:
+        operator = authenticate(authorization, minimum_role="viewer")
+        if isinstance(operator, JSONResponse):
+            return operator
         if resolved_job_repository is None:
             return _problem_response(
                 503,
@@ -549,7 +607,7 @@ def create_app(
                 ),
             )
         try:
-            job = resolved_job_repository.get_job(job_id)
+            job = service.get_job(operator, job_id)
         except StorageUnavailable:
             return _problem_response(
                 503,
@@ -572,6 +630,61 @@ def create_app(
             )
         return job
 
+    @app.get("/classifications/{classification_id}", response_model=ClassificationRecord)
+    def get_classification(
+        classification_id: UUID,
+        authorization: str | None = Header(default=None),
+    ) -> ClassificationRecord | JSONResponse:
+        operator = authenticate(authorization, minimum_role="viewer")
+        if isinstance(operator, JSONResponse):
+            return operator
+        try:
+            result = service.get_classification(operator, classification_id)
+        except StorageUnavailable:
+            return _storage_unavailable()
+        if result is None:
+            return _problem_response(
+                404,
+                ProblemDetail(
+                    code="classification_not_found",
+                    detail="The requested classification does not exist.",
+                    correlation_id=None,
+                    retryable=False,
+                ),
+            )
+        return result
+
+    @app.post("/jobs/{job_id}/retry", response_model=JobRecord, status_code=202)
+    def retry_failed_job(
+        job_id: UUID,
+        authorization: str | None = Header(default=None),
+    ) -> JobRecord | JSONResponse:
+        operator = authenticate(authorization, minimum_role="admin")
+        if isinstance(operator, JSONResponse):
+            return operator
+        try:
+            job = service.retry_job(operator, job_id)
+        except StorageUnavailable:
+            return _storage_unavailable()
+        except JobNotFound:
+            return _problem_response(
+                404,
+                ProblemDetail(
+                    code="job_not_found", detail="The requested job does not exist.",
+                    correlation_id=None, retryable=False,
+                ),
+            )
+        except InvalidJobState:
+            return _problem_response(
+                409,
+                ProblemDetail(
+                    code="job_not_failed", detail="Only a failed job can be retried by an admin.",
+                    correlation_id=None, retryable=False,
+                ),
+            )
+        metric_registry.increment("retried")
+        return job
+
     @app.post("/incidents/{incident_id}/drafts", response_model=DraftRecord, status_code=201)
     def create_response_draft(
         incident_id: UUID,
@@ -583,22 +696,7 @@ def create_app(
         if resolved_approval_repository is None:
             return _approval_unavailable()
         try:
-            incident = resolved_incident_repository.get_incident(incident_id)
-            if incident is None:
-                return _problem_response(
-                    404,
-                    ProblemDetail(
-                        code="incident_not_found",
-                        detail="The requested incident does not exist.",
-                        correlation_id=None,
-                        retryable=False,
-                    ),
-                )
-            return resolved_approval_repository.create_draft(
-                incident_id,
-                content=build_response_draft(incident),
-                created_by=operator.operator_id,
-            )
+            return service.create_draft(operator, incident_id)
         except StorageUnavailable:
             return _storage_unavailable()
 
@@ -613,7 +711,7 @@ def create_app(
         if resolved_approval_repository is None:
             return _approval_unavailable()
         try:
-            draft = resolved_approval_repository.get_draft(draft_id)
+            draft = service.get_draft(operator, draft_id)
         except StorageUnavailable:
             return _storage_unavailable()
         if draft is None:
@@ -633,10 +731,10 @@ def create_app(
         if resolved_approval_repository is None:
             return _approval_unavailable()
         try:
-            draft = resolved_approval_repository.decide(
+            draft = service.decide(
+                operator,
                 draft_id,
                 decision=decision,
-                operator=operator,
                 reason=request.reason,
             )
             metric_registry.increment(decision)

@@ -1,12 +1,12 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, and_, create_engine, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from incident_intel.classification import ClassificationResult
+from incident_intel.classification import ClassificationRecord, ClassificationResult
 from incident_intel.db import (
     classifications,
     event_ingestions,
@@ -40,6 +40,8 @@ from incident_intel.jobs import (
     utc_now,
 )
 from incident_intel.schemas import EventBundle
+
+JOB_CLAIM_LEASE = timedelta(minutes=5)
 
 
 def create_engine_from_url(database_url: str) -> Engine:
@@ -309,6 +311,46 @@ class PostgresJobRepository:
             raise StorageUnavailable from None
         return None if row is None else self._job_from_row(row)
 
+    def get_classification(self, classification_id: UUID) -> ClassificationRecord | None:
+        try:
+            with self.engine.connect() as connection:
+                row = connection.execute(
+                    select(classifications).where(classifications.c.id == classification_id)
+                ).mappings().one_or_none()
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+        if row is None:
+            return None
+        return ClassificationRecord(classification_id=row["id"], **dict(row))
+
+    def retry_job(self, job_id: UUID) -> JobRecord:
+        try:
+            with self.engine.begin() as connection:
+                current = connection.execute(
+                    select(outbox_jobs).where(outbox_jobs.c.id == job_id).with_for_update()
+                ).mappings().one_or_none()
+                if current is None:
+                    raise JobNotFound
+                if current["state"] != "failed":
+                    raise InvalidJobState
+                row = connection.execute(
+                    update(outbox_jobs)
+                    .where(outbox_jobs.c.id == job_id)
+                    .values(
+                        state="retry_pending",
+                        max_attempts=current["attempt_count"] + 1,
+                        next_attempt_at=utc_now(),
+                        claimed_at=None,
+                        claimed_by=None,
+                        claim_token=None,
+                        updated_at=utc_now(),
+                    )
+                    .returning(outbox_jobs)
+                ).mappings().one()
+        except SQLAlchemyError:
+            raise StorageUnavailable from None
+        return self._job_from_row(row)
+
     def claim_jobs(
         self,
         *,
@@ -321,13 +363,39 @@ class PostgresJobRepository:
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
         claimed_at = now or utc_now()
+        stale_before = claimed_at - JOB_CLAIM_LEASE
         try:
             with self.engine.begin() as connection:
+                connection.execute(
+                    update(outbox_jobs)
+                    .where(
+                        outbox_jobs.c.state == "processing",
+                        outbox_jobs.c.claimed_at <= stale_before,
+                        outbox_jobs.c.attempt_count >= outbox_jobs.c.max_attempts,
+                    )
+                    .values(
+                        state="failed",
+                        claimed_at=None,
+                        claimed_by=None,
+                        claim_token=None,
+                        last_error_class="WorkerLeaseExpired",
+                        updated_at=claimed_at,
+                    )
+                )
                 job_ids = connection.execute(
                     select(outbox_jobs.c.id)
                     .where(
-                        outbox_jobs.c.state.in_(("pending", "retry_pending")),
-                        outbox_jobs.c.next_attempt_at <= claimed_at,
+                        or_(
+                            and_(
+                                outbox_jobs.c.state.in_(("pending", "retry_pending")),
+                                outbox_jobs.c.next_attempt_at <= claimed_at,
+                            ),
+                            and_(
+                                outbox_jobs.c.state == "processing",
+                                outbox_jobs.c.claimed_at <= stale_before,
+                                outbox_jobs.c.attempt_count < outbox_jobs.c.max_attempts,
+                            ),
+                        )
                     )
                     .order_by(outbox_jobs.c.next_attempt_at, outbox_jobs.c.created_at)
                     .limit(limit)
@@ -335,18 +403,23 @@ class PostgresJobRepository:
                 ).scalars().all()
                 if not job_ids:
                     return ()
-                rows = connection.execute(
-                    update(outbox_jobs)
-                    .where(outbox_jobs.c.id.in_(job_ids))
-                    .values(
-                        state="processing",
-                        attempt_count=outbox_jobs.c.attempt_count + 1,
-                        claimed_at=claimed_at,
-                        claimed_by=worker_id,
-                        updated_at=claimed_at,
+                rows = []
+                for job_id in job_ids:
+                    rows.append(
+                        connection.execute(
+                            update(outbox_jobs)
+                            .where(outbox_jobs.c.id == job_id)
+                            .values(
+                                state="processing",
+                                attempt_count=outbox_jobs.c.attempt_count + 1,
+                                claimed_at=claimed_at,
+                                claimed_by=worker_id,
+                                claim_token=uuid4(),
+                                updated_at=claimed_at,
+                            )
+                            .returning(outbox_jobs)
+                        ).mappings().one()
                     )
-                    .returning(outbox_jobs)
-                ).mappings().all()
         except SQLAlchemyError:
             raise StorageUnavailable from None
         return tuple(self._job_from_row(row) for row in rows)
@@ -356,6 +429,7 @@ class PostgresJobRepository:
         job_id: UUID,
         error_class: str,
         *,
+        claim_token: UUID,
         retryable: bool,
         now: datetime | None = None,
     ) -> JobRecord:
@@ -370,7 +444,7 @@ class PostgresJobRepository:
                 ).mappings().one_or_none()
                 if current is None:
                     raise JobNotFound
-                if current["state"] != "processing":
+                if current["state"] != "processing" or current["claim_token"] != claim_token:
                     raise InvalidJobState
                 should_retry = retryable and current["attempt_count"] < current["max_attempts"]
                 next_attempt_at = (
@@ -386,6 +460,7 @@ class PostgresJobRepository:
                         next_attempt_at=next_attempt_at,
                         claimed_at=None,
                         claimed_by=None,
+                        claim_token=None,
                         last_error_class=safe_error,
                         updated_at=failed_at,
                     )
@@ -402,6 +477,7 @@ class PostgresJobRepository:
         job_id: UUID,
         result: ClassificationResult,
         *,
+        claim_token: UUID,
         now: datetime | None = None,
     ) -> JobRecord:
         completed_at = now or utc_now()
@@ -417,7 +493,7 @@ class PostgresJobRepository:
                     raise JobNotFound
                 if current["state"] == "completed":
                     return self._job_from_row(current)
-                if current["state"] != "processing":
+                if current["state"] != "processing" or current["claim_token"] != claim_token:
                     raise InvalidJobState
                 connection.execute(
                     insert(classifications).values(
@@ -443,6 +519,7 @@ class PostgresJobRepository:
                         result_id=result_id,
                         claimed_at=None,
                         claimed_by=None,
+                        claim_token=None,
                         last_error_class=None,
                         updated_at=completed_at,
                     )
@@ -466,6 +543,7 @@ class PostgresJobRepository:
             next_attempt_at=row["next_attempt_at"],
             claimed_at=row["claimed_at"],
             claimed_by=row["claimed_by"],
+            claim_token=row["claim_token"],
             completed_at=row["completed_at"],
             result_id=row["result_id"],
             last_error_class=row["last_error_class"],

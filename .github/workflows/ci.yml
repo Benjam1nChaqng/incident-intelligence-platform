@@ -33,6 +33,7 @@ jobs:
       INCIDENT_INTEL_STORAGE_BACKEND: postgres
       INCIDENT_INTEL_DATABASE_URL: postgresql+psycopg://incident_intel:ci-only-password@localhost:5432/incident_intel
       INCIDENT_INTEL_TEST_DATABASE_URL: postgresql+psycopg://incident_intel:ci-only-password@localhost:5432/incident_intel
+      INCIDENT_INTEL_TOKEN_SECRET: ci-placeholder-not-a-production-secret-123456789
 
     steps:
       - name: Check out repository
@@ -55,3 +56,6 @@ jobs:
 
       - name: Run lint
         run: python -m ruff check .
+
+      - name: Build runtime image
+        run: docker build -t incident-intelligence-platform:test .

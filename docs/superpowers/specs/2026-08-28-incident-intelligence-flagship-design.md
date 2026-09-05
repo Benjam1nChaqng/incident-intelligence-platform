@@ -1,7 +1,7 @@
 # Incident Intelligence Flagship Design
 
 **Date:** 2026-08-28
-**Status:** Draft for review
+**Status:** Approved by Benjamin; local implementation evidence is tracked in `docs/case-study.md`
 **Owner:** Benjamin Chang
 
 ## Purpose

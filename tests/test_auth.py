@@ -42,7 +42,9 @@ def test_token_rejects_tampering_and_expiration(mutation: str) -> None:
     )
 
     if mutation == "tamper":
-        token = f"{token[:-1]}{'A' if token[-1] != 'A' else 'B'}"
+        payload, signature = token.split(".")
+        replacement = "A" if payload[0] != "A" else "B"
+        token = f"{replacement}{payload[1:]}.{signature}"
         checked_at = now
     else:
         checked_at = now + timedelta(seconds=3)

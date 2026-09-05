@@ -1,7 +1,8 @@
 from time import perf_counter
 from typing import Literal, Protocol
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 from incident_intel.auth_failures import extract_auth_failure_evidence
 from incident_intel.schemas import EventBundle, LogEvent
@@ -28,6 +29,12 @@ class ClassificationResult(BaseModel):
 
 class Classifier(Protocol):
     def classify(self, bundle: EventBundle) -> ClassificationResult: ...
+
+
+class ClassificationRecord(ClassificationResult):
+    classification_id: UUID
+    incident_id: UUID
+    created_at: AwareDatetime
 
 
 class RulesClassifier:

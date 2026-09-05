@@ -48,15 +48,31 @@ class PostgresApprovalRepository:
         try:
             with self.engine.connect() as connection:
                 row = connection.execute(
-                    select(response_drafts).where(response_drafts.c.id == draft_id)
+                    select(
+                        response_drafts,
+                        *(
+                            column.label(f"decision_{column.name}")
+                            for column in approval_decisions.c
+                        ),
+                    )
+                    .select_from(
+                        response_drafts.outerjoin(
+                            approval_decisions,
+                            approval_decisions.c.draft_id == response_drafts.c.id,
+                        )
+                    )
+                    .where(response_drafts.c.id == draft_id)
                 ).mappings().one_or_none()
                 if row is None:
                     return None
-                decision = connection.execute(
-                    select(approval_decisions).where(
-                        approval_decisions.c.draft_id == draft_id
-                    )
-                ).mappings().one_or_none()
+                decision = (
+                    {
+                        column.name: row[f"decision_{column.name}"]
+                        for column in approval_decisions.c
+                    }
+                    if row["decision_id"] is not None
+                    else None
+                )
         except SQLAlchemyError:
             raise StorageUnavailable from None
         return self._draft_from_row(row, decision)
