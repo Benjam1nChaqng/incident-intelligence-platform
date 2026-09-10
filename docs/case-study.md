@@ -46,12 +46,15 @@ no vendor API compatibility, live tenant operation, or production administration
 
 The [owner runbook](PORTFOLIO-OWNER.md) and [finish checklist](superpowers/plans/2026-09-10-portfolio-finish.md)
 freeze new features and separate local completion from public closeout. The existing daily automation
-now resumes the single owner task at 7:00 PM Pacific. A CI step for standard Compose startup,
-readiness, the existing assertion-driven demo, and isolated cleanup is staged; local YAML and
-PowerShell parse checks passed. Its Ubuntu/PowerShell route follows the
+now resumes the single owner task at 7:00 PM Pacific. After Benji approved publication, revision
+`d4420f21a3e6cb0942ef62944db5bc298dffe626` was pushed and its
+[GitHub CI run](https://github.com/Benjam1nChaqng/incident-intelligence-platform/actions/runs/34514582082)
+passed 138 tests with no skips in 4.59 seconds. Migration, lint, image build, standard Compose
+startup, readiness, the existing assertion-driven demo, and isolated cleanup all passed.
+Its Ubuntu/PowerShell route follows the
 [GitHub Actions documentation](https://docs.github.com/en/actions/tutorials/build-and-test-code/powershell).
-This is configuration validation, not a successful remote execution. GitHub main was read back at
-`946be4bbdb0ba6099f7ca5d3ca15b839c95ced39`; its successful September 1 CI is not release verification.
+The [publication record](verification-2026-09-10-publication.md) captures exact results. This verifies
+the technical release; no production deployment, live vendor experience, or human rehearsal is implied.
 
 ### September 4 packaged runtime evidence
 
@@ -76,9 +79,10 @@ unprivileged `app` user (UID 100). The supplied Compose file validates, and
 fresh database initialization and all four services passed staged startup with explicit database
 health, migration exit, and API readiness gates. This host lacks Podman health timers and its
 Compose provider fails nested one-shot dependencies. Consequently, ordinary one-command Docker
-Compose startup is **staged, not verified**. The repeatable
+Compose startup was **staged, not verified at that checkpoint**. The repeatable
 [local verification procedure](local-verification.md) records the working fallback without
-changing operating-system settings. Remote CI has not run because nothing has been pushed.
+changing operating-system settings. Remote CI had not run at that checkpoint because the release
+had not yet been pushed; the September 10 remote evidence above supersedes that publication status.
 
 An independent code review led to regression coverage for unique per-attempt ownership, service
 authorization, consistent approval reads, runtime logging, and demo database-target selection.
@@ -100,20 +104,20 @@ reject uncited predictions and invented IDs while permitting empty citations for
 
 | # | Acceptance check | Status | Evidence or boundary |
 | ---: | --- | --- | --- |
-| 1 | Clean start for API, worker, and PostgreSQL | Verified via documented fallback | Fresh synthetic Compose database and packaged services, with explicit prerequisite checks; one-command Docker startup staged. |
+| 1 | Clean start for API, worker, and PostgreSQL | Verified | September 10 GitHub run passed standard Compose startup and the full demo; September 4 separately verified the Podman fallback. |
 | 2 | Empty-database migrations | Verified | Full reversal, previous-revision upgrade, and new claim-token/FK checks against PostgreSQL. |
 | 3 | Duplicate, conflict, concurrency, retry, approval invariants | Verified September 10 | 138-test suite includes real concurrent claims/decisions, lease expiry, stale-worker fencing, replay, admin retry, and the offline offboarding fixture. |
 | 4 | Reproducible deterministic evaluation | Verified | Versioned dataset, command, checked-in JSON report, and metric tests. |
 | 5 | Published GPT comparison is measured | Not applicable | No GPT result or cost claim is published. |
 | 6 | Drafts cannot bypass approval | Verified | API and service role checks, row lock, state constraint, and a unique persisted decision. |
-| 7 | CI, image, and demo | Verified locally; remote CI staged | Full local test/lint suite, image build, fresh packaged demos and database recovery. No remote CI claim. |
+| 7 | CI, image, and demo | Verified | Exact published revision d4420f2 passed GitHub tests/lint, image build, Compose startup, and demo. September 4 local evidence separately covers database recovery. |
 | 8 | Synthetic fixtures and privacy scan | Verified within scan scope | 71-file targeted scan and tested body/token exclusion from request logs. |
 | 9 | Honest case study | Verified | Records measured results, test environment, startup limitation, and explicit future work. |
 | 10 | Short interview explanation | Staged for Benji | Walkthrough and questions prepared. Benji's own explanation and recall have not been assessed. |
 
-The local implementation and documented fallback demo are verified. Full public-portfolio
-acceptance is not claimed: remote CI, the standard Docker startup rehearsal, and Benji's interview
-rehearsal remain staged. Push, public visibility, and deployment are separate approval-gated actions.
+The technical portfolio release is published and verified, including standard Docker startup.
+Benji's own interview rehearsal remains unassessed; it is the only remaining human closeout item.
+No production service has been deployed. New deployment or feature scope still needs separate authorization.
 
 ## Ninety-second interview walkthrough
 

@@ -90,28 +90,34 @@ from remote CI and actual vendor experience. No new feature is needed to pass th
 
 Files: existing `.github/workflows/ci.yml`, `compose.yaml`, `scripts/demo.ps1`, release records.
 
-- [ ] Present the exact reviewed publish candidate and obtain authorization to push it to the
+- [x] Present the exact reviewed publish candidate and obtain authorization to push it to the
   already-public `Benjam1nChaqng/incident-intelligence-platform` repository.
-- [ ] After authorization, recheck remote HEAD for concurrent changes and publish only the reviewed
+- [x] After authorization, recheck remote HEAD for concurrent changes and publish only the reviewed
   descendant without force. Verify GitHub's HEAD and successful CI for the exact pushed revision.
-- [ ] On an available Docker Compose host, rehearse fresh startup, readiness, and `scripts/demo.ps1`;
+- [x] On an available Docker Compose host, rehearse fresh startup, readiness, and `scripts/demo.ps1`;
   alternatively obtain Benji's explicit acceptance of the documented Podman fallback limitation.
 - [x] Prepare a GitHub CI step for standard Compose startup, readiness, the existing demo, and
   cleanup of only that fresh CI project. YAML and embedded PowerShell parse checks passed locally.
-  Execution remains staged until an authorized push runs it on GitHub's Ubuntu runner.
+  Execution passed on GitHub's Ubuntu runner for the approved published revision `d4420f2`.
 
 Acceptance: no old-CI, container-created, or image-built result is used as proof of an unrun demo.
-This gate is currently pending publication authorization. The staged CI step supplies the standard
-Docker environment after publication. WSL's `docker --version` returned Podman 5.3.1, so that local
-command is not evidence of Docker Engine.
+This gate passed September 10: user approval, non-force publication of all 24 reviewed commits,
+remote HEAD readback, and successful exact-revision
+[CI run 34514582082](https://github.com/Benjam1nChaqng/incident-intelligence-platform/actions/runs/34514582082).
+CI passed 138 tests with zero skips, image build, standard Compose startup, readiness, demo and cleanup.
+The result is for `d4420f21a3e6cb0942ef62944db5bc298dffe626`. This documentation follow-up is evidence
+packaging; its own CI must be checked separately before claiming the latest repository HEAD is green.
+WSL's local `docker` command remains a Podman wrapper and was not used as Docker Engine evidence.
 
 ## Gate 5: Handoff and stop
 
 Files: existing `docs/case-study.md` interview walkthrough and this checklist.
 
-- [ ] Give Benji the existing 90-second walkthrough, demo command, and core tradeoff questions.
+- [x] Prepare and link Benji's existing 90-second walkthrough, demo command, and core tradeoff
+  questions in `docs/verification-2026-09-10-publication.md` for the final handoff.
 - [ ] Record his interview rehearsal only after he actually performs or explicitly waives it.
-- [ ] Summarize verified release, any accepted limitations, published revision/CI, and deferred work.
+- [x] Summarize verified release, limitations, published revision/CI, and deferred work in the
+  publication record and case study. No new project is selected.
 - [ ] Pause `daily-portfolio-build` after all accepted finish gates pass; do not create the next app.
 
 Deferred: broader Google/Okta/Slack/Jamf labs, live integrations, paid GPT comparisons, browser UI,
@@ -120,7 +126,7 @@ explicit user goal after closeout. Release gates, not elapsed days or commit quo
 
 ## Next owner action
 
-Local closeout and packaging are complete. Publication authorization is pending; the exact final
-revision is reported in the owner task. On approval recheck the remote, push without force, and inspect CI for
-that exact revision including the new Compose demo step. Benji's interview rehearsal remains a
-human gate. Do not repeat a blocked event or rerun unchanged tests on the next daily wakeup.
+Technical release and publication are complete. Verify the documentation follow-up's exact-SHA CI,
+then leave only Benji's interview rehearsal pending. Do not create features, redo the accepted lab,
+or repeat a blocked event on daily wakeups. Stay quiet while this human gate is unchanged. After
+Benji confirms the rehearsal or explicitly waives it, record that fact and pause daily-portfolio-build.

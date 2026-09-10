@@ -14,6 +14,12 @@ Daily automation ID: `daily-portfolio-build`. Retain 7:00 PM America/Los_Angeles
 Finish checklist: [September 10 plan](superpowers/plans/2026-09-10-portfolio-finish.md).
 Architecture and prior acceptance: [case study](case-study.md).
 
+Current closeout: the approved technical release `d4420f2` is published and its
+[remote tests, standard Compose startup, and demo passed](verification-2026-09-10-publication.md).
+Only Benji's personal interview rehearsal remains unassessed. Verify the documentation follow-up's
+CI once, then stay quiet while that human item is unchanged. Do not reopen technical gates or start
+features merely because the daily automation runs. His publication approval did not waive rehearsal.
+
 ## Single owner workflow
 
 1. Read this file, the finish checklist, latest verification, and `git status --short --branch`.
