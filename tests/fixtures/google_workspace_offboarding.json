@@ -1,0 +1,33 @@
+{
+  "fixture_format": "synthetic-google-workspace-offboarding-v1",
+  "correlation_id": "INC-OFFBOARD-001",
+  "ticket": {
+    "ticket_id": "TCK-OFFBOARD-001",
+    "subject": "Synthetic access recorded after identity disablement",
+    "description": "Offline simulation only: a disabled synthetic identity has a later allowed access event from its assigned synthetic endpoint. This is not vendor telemetry.",
+    "priority": "high",
+    "source": "monitoring",
+    "requester_role": "Synthetic lab operator",
+    "created_at": "2026-09-04T10:06:00Z",
+    "tags": ["synthetic", "offboarding", "google-workspace-lab"]
+  },
+  "identity": {
+    "event_id": "GW-DISABLED-001",
+    "synthetic_user_id": "synthetic-user-offboarding-001",
+    "state": "disabled",
+    "disabled_at": "2026-09-04T10:00:00Z"
+  },
+  "endpoint": {
+    "synthetic_endpoint_id": "synthetic-endpoint-001",
+    "assigned_synthetic_user_id": "synthetic-user-offboarding-001"
+  },
+  "access_events": [
+    {
+      "event_id": "GW-ACCESS-001",
+      "observed_at": "2026-09-04T10:05:00Z",
+      "synthetic_user_id": "synthetic-user-offboarding-001",
+      "synthetic_endpoint_id": "synthetic-endpoint-001",
+      "result": "allowed"
+    }
+  ]
+}
