@@ -35,6 +35,26 @@ bounded JSON request logs, operation counters, and independent health and databa
 
 ## Measured evidence
 
+### September 10 owner closeout
+
+The [current verification record](verification-2026-09-10-owner.md) reports **138 passed, zero skips,
+in 23.86 seconds** against a newly created PostgreSQL 16.14 database. Empty-schema migrations,
+Ruff, whitespace checks, and removal of only the new disposable container passed. This includes
+24 tests for the [reviewed synthetic offboarding lab](reviews/2026-09-10-offboarding-owner-review.md),
+an invented offline fixture format mapped into the existing EventBundle contract. It establishes
+no vendor API compatibility, live tenant operation, or production administration experience.
+
+The [owner runbook](PORTFOLIO-OWNER.md) and [finish checklist](superpowers/plans/2026-09-10-portfolio-finish.md)
+freeze new features and separate local completion from public closeout. The existing daily automation
+now resumes the single owner task at 7:00 PM Pacific. A CI step for standard Compose startup,
+readiness, the existing assertion-driven demo, and isolated cleanup is staged; local YAML and
+PowerShell parse checks passed. Its Ubuntu/PowerShell route follows the
+[GitHub Actions documentation](https://docs.github.com/en/actions/tutorials/build-and-test-code/powershell).
+This is configuration validation, not a successful remote execution. GitHub main was read back at
+`946be4bbdb0ba6099f7ca5d3ca15b839c95ced39`; its successful September 1 CI is not release verification.
+
+### September 4 packaged runtime evidence
+
 September 4, 2026 local verification used Windows PowerShell 7, Python 3.12, and PostgreSQL 16 in
 rootful Podman on WSL. The final automated suite passed **114 tests, zero skips, in 42.22 seconds**
 with the PostgreSQL runtime and test URLs configured. Ruff and the whitespace diff check passed.
@@ -82,7 +102,7 @@ reject uncited predictions and invented IDs while permitting empty citations for
 | ---: | --- | --- | --- |
 | 1 | Clean start for API, worker, and PostgreSQL | Verified via documented fallback | Fresh synthetic Compose database and packaged services, with explicit prerequisite checks; one-command Docker startup staged. |
 | 2 | Empty-database migrations | Verified | Full reversal, previous-revision upgrade, and new claim-token/FK checks against PostgreSQL. |
-| 3 | Duplicate, conflict, concurrency, retry, approval invariants | Verified | 114-test suite includes real concurrent claims/decisions, lease expiry, stale-worker fencing, replay, and admin retry. |
+| 3 | Duplicate, conflict, concurrency, retry, approval invariants | Verified September 10 | 138-test suite includes real concurrent claims/decisions, lease expiry, stale-worker fencing, replay, admin retry, and the offline offboarding fixture. |
 | 4 | Reproducible deterministic evaluation | Verified | Versioned dataset, command, checked-in JSON report, and metric tests. |
 | 5 | Published GPT comparison is measured | Not applicable | No GPT result or cost claim is published. |
 | 6 | Drafts cannot bypass approval | Verified | API and service role checks, row lock, state constraint, and a unique persisted decision. |

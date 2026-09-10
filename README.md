@@ -111,6 +111,13 @@ proves repeatability and contract behavior, not real-world generalization.
 
 ## Verification
 
+The [portfolio owner](docs/PORTFOLIO-OWNER.md) follows a finite
+[finish checklist](docs/superpowers/plans/2026-09-10-portfolio-finish.md). The
+[September 10 verification](docs/verification-2026-09-10-owner.md) passed **138 tests with zero
+skips** against a fresh PostgreSQL 16.14 database, including the reviewed
+[synthetic offboarding lab](docs/reviews/2026-09-10-offboarding-owner-review.md).
+The new CI Compose startup/demo check is prepared but has not run remotely.
+
 Use a disposable PostgreSQL 16 test database: integration tests create and drop schema objects.
 Set `INCIDENT_INTEL_TEST_DATABASE_URL` to that database, then run:
 
@@ -125,8 +132,8 @@ Integration tests skip when the test database variable is absent. The applicatio
 falls back to memory; a backend must be selected explicitly. PostgreSQL runtime configuration also
 requires a local token secret.
 
-The final verification record is maintained in the [case study](docs/case-study.md). The local
-suite passed all 114 tests against PostgreSQL 16, including migrations and contention checks.
+The final verification record is maintained in the [case study](docs/case-study.md). The September 4
+suite passed all 114 then-existing tests against PostgreSQL 16, including migrations and contention checks.
 A checked-in CI workflow is not evidence of a remote CI run. Docker Compose's single-command
 startup remains unverified on this Podman-only host; the packaged services and complete demo were
 verified with explicit prerequisite gates. The exact [WSL/Podman fallback](docs/local-verification.md)
