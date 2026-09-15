@@ -1,9 +1,14 @@
+import hashlib
+import json
+from _thread import LockType
 from dataclasses import dataclass, field
 from enum import StrEnum
+from threading import Lock
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from incident_intel.ingestion import IdempotencyConflict
 from incident_intel.schemas import EventBundle
 
 
@@ -35,12 +40,15 @@ class WebhookDeliveryRecord(BaseModel):
 @dataclass
 class InMemoryWebhookDeliveryStore:
     records_by_key: dict[str, WebhookDeliveryRecord] = field(default_factory=dict)
+    _request_hash_by_key: dict[str, str] = field(default_factory=dict, repr=False)
+    _lock: LockType = field(default_factory=Lock, repr=False, compare=False)
 
     def get(self, idempotency_key: str) -> WebhookDeliveryRecord | None:
-        return self.records_by_key.get(idempotency_key)
+        record = self.records_by_key.get(idempotency_key)
+        return record.model_copy(deep=True) if record is not None else None
 
     def save(self, record: WebhookDeliveryRecord) -> None:
-        self.records_by_key[record.idempotency_key] = record
+        self.records_by_key[record.idempotency_key] = record.model_copy(deep=True)
 
 
 def record_webhook_delivery(
@@ -50,23 +58,32 @@ def record_webhook_delivery(
     request: WebhookDeliveryRequest,
     status_code: int,
 ) -> WebhookDeliveryRecord:
-    existing_record = store.get(idempotency_key)
-    if existing_record is not None:
-        return existing_record.model_copy(update={"duplicate": True})
-
-    status = _status_from_code(status_code)
-    record = WebhookDeliveryRecord(
-        delivery_id=f"whd_{uuid4().hex}",
-        idempotency_key=idempotency_key,
-        destination_name=request.destination_name,
-        event_type=request.event_type,
-        status=status,
-        attempt_count=1,
-        duplicate=False,
-        next_retry_after_seconds=30 if status is WebhookDeliveryStatus.RETRY_PENDING else None,
+    canonical_request = json.dumps(
+        request.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
-    store.save(record)
-    return record
+    request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+    # The request identity and receipt must be checked and saved as one operation.
+    with store._lock:
+        existing_record = store.get(idempotency_key)
+        if existing_record is not None:
+            if store._request_hash_by_key.get(idempotency_key) != request_hash:
+                raise IdempotencyConflict
+            return existing_record.model_copy(update={"duplicate": True})
+
+        status = _status_from_code(status_code)
+        record = WebhookDeliveryRecord(
+            delivery_id=f"whd_{uuid4().hex}",
+            idempotency_key=idempotency_key,
+            destination_name=request.destination_name,
+            event_type=request.event_type,
+            status=status,
+            attempt_count=1,
+            duplicate=False,
+            next_retry_after_seconds=30 if status is WebhookDeliveryStatus.RETRY_PENDING else None,
+        )
+        store.save(record)
+        store._request_hash_by_key[idempotency_key] = request_hash
+        return record
 
 
 def _status_from_code(status_code: int) -> WebhookDeliveryStatus:

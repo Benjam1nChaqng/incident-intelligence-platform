@@ -77,6 +77,7 @@ incidents in the local database. The API and worker must be running and ready fi
 | --- | --- | --- |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` | Public local operations | Process, database, and metrics evidence |
 | `POST /events` | Public, trusted loopback | Atomically ingest a synthetic event bundle |
+| `POST /webhooks/deliveries/preview` | Public, trusted loopback | Preview a process-local synthetic delivery receipt |
 | `GET /incidents`, `GET /incidents/{id}` | Viewer | Retrieve paginated incidents and timelines |
 | `POST /incidents/{id}/classifications` | Operator | Enqueue a durable classification job |
 | `GET /jobs/{id}` | Viewer | Inspect job state and failure class |
@@ -85,6 +86,14 @@ incidents in the local database. The API and worker must be running and ready fi
 | `POST /incidents/{id}/drafts` | Operator | Create a deterministic pending draft |
 | `GET /drafts/{id}` | Viewer | Review draft and decision state |
 | `POST /drafts/{id}/approve`, `POST /drafts/{id}/reject` | Operator | Record one final human decision |
+
+The webhook preview requires an `Idempotency-Key`. The first request returns `201`; an identical
+destination, event type and payload replay returns `200` with the original delivery receipt.
+Reusing that key with any of those fields changed returns `409` / `idempotency_key_reused` and
+leaves the original receipt intact. Use a new key for a different request. JSON object key order
+does not change request identity. The preview never sends a webhook; its receipts exist only
+within one application process and are lost on restart, including when PostgreSQL is configured.
+See the [idempotency regression verification](docs/verification-2026-09-15-webhook-idempotency.md).
 
 Capture a 15-minute local token after setting `INCIDENT_INTEL_TOKEN_SECRET`; do not paste it into
 logs, screenshots, or the repository:

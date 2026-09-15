@@ -5,6 +5,16 @@
 
 **Goal:** Finish and package the existing Incident Intelligence Platform, then end daily feature work.
 
+**September 14 scope update:** Benji subsequently authorized one useful, verified GitHub contribution
+per day to this repository. Bounded maintenance and normal reviewed pushes may continue after the
+release; the shared automation must remain active. This newer mandate supersedes the pause/stop
+instructions below, while preserving completed release evidence and the unassessed human rehearsal.
+
+**September 15 maintenance:** Corrected webhook preview keys accepting changed requests as duplicates.
+[Verification](../../verification-2026-09-15-webhook-idempotency.md): 147 local tests passed with
+PostgreSQL and zero skips; Ruff, migrations and disposable-container cleanup passed. The next gate
+for this contribution is exact-SHA publication and remote CI, recorded in the local daily checkpoint.
+
 **Architecture:** Keep the implemented FastAPI, PostgreSQL, durable worker, deterministic classifier,
 and operator approval boundaries. A single persistent Codex owner coordinates the existing daily
 schedule and reviews evidence. No custom bot server or new application subsystem is required.

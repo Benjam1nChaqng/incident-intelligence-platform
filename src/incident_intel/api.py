@@ -788,18 +788,35 @@ def create_app(
     def preview_runbook_draft(bundle: EventBundle) -> RunbookDraft:
         return draft_runbook_response(bundle)
 
-    @app.post("/webhooks/deliveries/preview", response_model=WebhookDeliveryRecord, status_code=201)
+    @app.post(
+        "/webhooks/deliveries/preview", response_model=WebhookDeliveryRecord, status_code=201,
+        responses={409: {"model": ProblemDetail, "description": "Idempotency key reused"}},
+    )
     def preview_webhook_delivery(
         request: WebhookDeliveryRequest,
         response: Response,
         idempotency_key: str = Header(min_length=8),
-    ) -> WebhookDeliveryRecord:
-        delivery = record_webhook_delivery(
-            store=webhook_delivery_store,
-            idempotency_key=idempotency_key,
-            request=request,
-            status_code=202,
-        )
+    ) -> WebhookDeliveryRecord | JSONResponse:
+        try:
+            delivery = record_webhook_delivery(
+                store=webhook_delivery_store,
+                idempotency_key=idempotency_key,
+                request=request,
+                status_code=202,
+            )
+        except IdempotencyConflict:
+            metric_registry.increment("conflict")
+            return _problem_response(
+                409,
+                ProblemDetail(
+                    code="idempotency_key_reused",
+                    detail=(
+                        "Idempotency key is already associated with a different webhook request."
+                    ),
+                    correlation_id=request.payload.correlation_id,
+                    retryable=False,
+                ),
+            )
         if delivery.duplicate:
             response.status_code = 200
         return delivery
