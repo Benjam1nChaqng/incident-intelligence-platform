@@ -95,6 +95,12 @@ does not change request identity. The preview never sends a webhook; its receipt
 within one application process and are lost on restart, including when PostgreSQL is configured.
 See the [idempotency regression verification](docs/verification-2026-09-15-webhook-idempotency.md).
 
+The explicitly selected in-memory event store serializes concurrent calls within one store
+instance, preserving the same duplicate and conflict rules as sequential requests. Its data is
+lost on restart and is not shared between application processes; use PostgreSQL for durable,
+multi-process ingestion. See the
+[overlapping-ingestion verification](docs/verification-2026-09-16-ingestion-concurrency.md).
+
 Capture a 15-minute local token after setting `INCIDENT_INTEL_TOKEN_SECRET`; do not paste it into
 logs, screenshots, or the repository:
 

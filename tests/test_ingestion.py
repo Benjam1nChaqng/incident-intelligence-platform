@@ -1,6 +1,8 @@
 import copy
 import json
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
+from threading import Event
 
 import httpx
 import pytest
@@ -71,6 +73,65 @@ def test_in_memory_store_rejects_correlation_id_under_different_key() -> None:
 
     with pytest.raises(CorrelationConflict):
         store.ingest("fixture-auth-failure-002", bundle)
+
+
+@pytest.mark.parametrize("contender", ["replay", "changed_payload", "different_key"])
+def test_in_memory_store_serializes_overlapping_ingestions(contender: str) -> None:
+    receipt_written = Event()
+    release_writer = Event()
+    contender_started = Event()
+
+    class PausedReceipts(dict):
+        """Expose the first receipt before its hash and correlation index are written."""
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            if not receipt_written.is_set():
+                receipt_written.set()
+                if not release_writer.wait(timeout=5):
+                    raise TimeoutError("The test did not release the first writer")
+
+    store = InMemoryIngestionStore(records_by_key=PausedReceipts())
+    bundle = EventBundle.model_validate(load_bundle())
+    first_key = "fixture-auth-failure-001"
+    second_key = "fixture-auth-failure-002" if contender == "different_key" else first_key
+    second_bundle = bundle
+    if contender == "changed_payload":
+        second_bundle = bundle.model_copy(
+            update={"ticket": bundle.ticket.model_copy(update={"subject": "Changed subject"})}
+        )
+
+    def ingest_contender():
+        contender_started.set()
+        return store.ingest(second_key, second_bundle)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(store.ingest, first_key, bundle)
+        try:
+            assert receipt_written.wait(timeout=5)
+            second = pool.submit(ingest_contender)
+            assert contender_started.wait(timeout=5)
+            # Allow the competing call to encounter the partial write if not serialized.
+            # A serialized call waits until the first writer is released below.
+            wait([second], timeout=0.25)
+        finally:
+            release_writer.set()
+
+        record, duplicate = first.result(timeout=5)
+        assert duplicate is False
+        if contender == "replay":
+            assert second.result(timeout=5) == (record, True)
+        else:
+            conflict = (
+                IdempotencyConflict if contender == "changed_payload" else CorrelationConflict
+            )
+            with pytest.raises(conflict):
+                second.result(timeout=5)
+
+    assert store.records_by_key == {first_key: record}
+    assert store.payload_hash_by_key == {first_key: bundle_payload_hash(bundle)}
+    assert store.key_by_correlation_id == {bundle.correlation_id: first_key}
+    assert store.ingest(first_key, bundle) == (record, True)
 
 
 @pytest.mark.anyio

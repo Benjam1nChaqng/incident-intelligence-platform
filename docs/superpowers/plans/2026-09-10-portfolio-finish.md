@@ -12,8 +12,16 @@ instructions below, while preserving completed release evidence and the unassess
 
 **September 15 maintenance:** Corrected webhook preview keys accepting changed requests as duplicates.
 [Verification](../../verification-2026-09-15-webhook-idempotency.md): 147 local tests passed with
-PostgreSQL and zero skips; Ruff, migrations and disposable-container cleanup passed. The next gate
-for this contribution is exact-SHA publication and remote CI, recorded in the local daily checkpoint.
+PostgreSQL and zero skips; Ruff, migrations and disposable-container cleanup passed. Published as
+`d8fb18c328f4a73186c88a92c6d22166530c3c3f`; its
+[remote CI](https://github.com/Benjam1nChaqng/incident-intelligence-platform/actions/runs/35002581331)
+passed all 147 tests, lint, image build and the standard Compose/demo rehearsal.
+
+**September 16 maintenance:** Serialized overlapping in-memory ingestion to preserve receipt,
+payload-hash and correlation-ID consistency. Three regression cases reproduced the prior failure.
+[Verification](../../verification-2026-09-16-ingestion-concurrency.md): 150 local tests passed with
+PostgreSQL and zero skips, plus Ruff, migrations and disposable-container cleanup. The next gate
+is exact-SHA publication and remote CI, recorded in the local daily checkpoint.
 
 **Architecture:** Keep the implemented FastAPI, PostgreSQL, durable worker, deterministic classifier,
 and operator approval boundaries. A single persistent Codex owner coordinates the existing daily

@@ -1,6 +1,8 @@
 import hashlib
 import json
+from _thread import LockType
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Protocol
 
 from incident_intel.schemas import EventBundle
@@ -55,26 +57,28 @@ class InMemoryIngestionStore:
     records_by_key: dict[str, IngestionRecord] = field(default_factory=dict)
     payload_hash_by_key: dict[str, str] = field(default_factory=dict)
     key_by_correlation_id: dict[str, str] = field(default_factory=dict)
+    _lock: LockType = field(default_factory=Lock, init=False, repr=False, compare=False)
 
     def ingest(self, idempotency_key: str, bundle: EventBundle) -> tuple[IngestionRecord, bool]:
         payload_hash = bundle_payload_hash(bundle)
-        existing_record = self.records_by_key.get(idempotency_key)
-        if existing_record is not None:
-            if self.payload_hash_by_key[idempotency_key] != payload_hash:
-                raise IdempotencyConflict(idempotency_key)
-            return existing_record, True
+        with self._lock:
+            existing_record = self.records_by_key.get(idempotency_key)
+            if existing_record is not None:
+                if self.payload_hash_by_key[idempotency_key] != payload_hash:
+                    raise IdempotencyConflict(idempotency_key)
+                return existing_record, True
 
-        existing_key = self.key_by_correlation_id.get(bundle.correlation_id)
-        if existing_key is not None:
-            raise CorrelationConflict(bundle.correlation_id)
+            existing_key = self.key_by_correlation_id.get(bundle.correlation_id)
+            if existing_key is not None:
+                raise CorrelationConflict(bundle.correlation_id)
 
-        record = IngestionRecord(
-            idempotency_key=idempotency_key,
-            correlation_id=bundle.correlation_id,
-            ticket_id=bundle.ticket.ticket_id,
-            log_count=len(bundle.logs),
-        )
-        self.records_by_key[idempotency_key] = record
-        self.payload_hash_by_key[idempotency_key] = payload_hash
-        self.key_by_correlation_id[bundle.correlation_id] = idempotency_key
-        return record, False
+            record = IngestionRecord(
+                idempotency_key=idempotency_key,
+                correlation_id=bundle.correlation_id,
+                ticket_id=bundle.ticket.ticket_id,
+                log_count=len(bundle.logs),
+            )
+            self.records_by_key[idempotency_key] = record
+            self.payload_hash_by_key[idempotency_key] = payload_hash
+            self.key_by_correlation_id[bundle.correlation_id] = idempotency_key
+            return record, False
