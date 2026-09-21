@@ -1,5 +1,10 @@
 # Incident Intelligence Platform
 
+**Status: closed as a portfolio reference on September 20, 2026.** Active development and
+recurring maintenance ended at the owner's request. The last functional revision passed
+162 tests and the Docker Compose demo in [CI](https://github.com/Benjam1nChaqng/incident-intelligence-platform/actions/runs/35556556628).
+The project remains available to run and explain; it has no production users or deployment.
+
 Incident Intelligence Platform is a synthetic support-operations backend built to demonstrate
 production-minded backend, platform, and applied-AI engineering. It accepts a support ticket plus
 log evidence, persists the incident atomically, classifies it in a durable worker, and keeps every

@@ -1,5 +1,12 @@
 # Incident Intelligence Portfolio Finish Plan
 
+**Closed by user decision, September 20, 2026.** Benji ended active development because the
+project was not being used. Preserve it as a portfolio reference. Stop the daily commit and
+shared research loops; do not reopen technical gates or require an interview rehearsal to stop.
+Rehearsal remains unassessed, not completed. The saved schedule is `PAUSED`; native app UI
+acknowledgement was unavailable. See [owner closeout](../../PORTFOLIO-OWNER.md).
+Everything below records earlier plans and verification, superseded where it calls for more work.
+
 > For agentic workers: use `superpowers:subagent-driven-development` for independent implementation
 > work or `superpowers:executing-plans` for sequential execution. Read the owner runbook first.
 

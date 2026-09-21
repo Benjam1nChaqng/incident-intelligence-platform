@@ -1,5 +1,26 @@
 # Incident Intelligence portfolio owner
 
+## Closed by user decision, September 20, 2026
+
+Benji requested that this project be wrapped up because it was not being used. This supersedes
+the September 14 daily-commit mandate and every older continuation or pause condition below.
+Stop recurring maintenance, release checks, feature work and automatic research. Preserve the
+repository as a runnable portfolio reference. Reopen only for a new explicit user request.
+
+Last functional revision: `ecd25644e90e79566899c2ffccdf054fd1ddee3f`. Its exact-SHA
+[CI](https://github.com/Benjam1nChaqng/incident-intelligence-platform/actions/runs/35556556628)
+passed 162 tests, migrations, lint, image build, standard Compose startup and the demo.
+The interview rehearsal remains unassessed; project retirement does not claim it was performed.
+The synthetic lab and false resume/production claim flags remain unchanged.
+
+The shared `daily-portfolio-build` saved configuration was changed to `PAUSED`, with a retirement
+prompt that forbids further work. Its native automation tool was unavailable in this session;
+the TOML was backed up, narrowly updated and parsed/read back. Native app UI acknowledgement was
+not verified. Open Source Ops tools remain available on demand; their automatic research and
+browser retry loop are retired with this shared schedule. No replacement schedule was created.
+
+The following runbook is historical context, not permission to restart work.
+
 Updated September 10, 2026. Owner: the Codex task `Portfolio owner - Incident Intelligence`.
 
 ## Mission and scope
