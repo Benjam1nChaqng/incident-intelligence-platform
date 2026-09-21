@@ -86,6 +86,30 @@ def test_auth_failure_fixture_matches_event_bundle_schema() -> None:
     assert len(bundle.logs) == 2
 
 
+@pytest.mark.parametrize("tags", ["authentication", {"authentication": True}, 42, True, 1.5])
+def test_support_ticket_rejects_invalid_tag_containers(tags: object) -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["ticket"]
+    payload["tags"] = tags
+
+    with pytest.raises(ValidationError, match="tags"):
+        SupportTicket.model_validate(payload)
+
+
+@pytest.mark.parametrize("tags", [None, [], ["authentication", "password-reset"]])
+def test_support_ticket_preserves_supported_tag_inputs(tags: object) -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["ticket"]
+    payload["tags"] = tags
+
+    assert SupportTicket.model_validate(payload).tags == tuple(tags or ())
+
+
+def test_support_ticket_defaults_missing_tags_to_empty() -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["ticket"]
+    payload.pop("tags", None)
+
+    assert SupportTicket.model_validate(payload).tags == ()
+
+
 def test_support_ticket_rejects_naive_created_at() -> None:
     payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["ticket"]
     payload["created_at"] = "2026-08-26T15:21:00"

@@ -101,6 +101,10 @@ lost on restart and is not shared between application processes; use PostgreSQL 
 multi-process ingestion. See the
 [overlapping-ingestion verification](docs/verification-2026-09-16-ingestion-concurrency.md).
 
+Ticket `tags` must be an array of strings. Omitted tags, `null`, and `[]` mean no tags.
+Other JSON shapes return `422` before ingestion, so a corrected request can reuse its
+idempotency key. See the [tag validation regression](docs/verification-2026-09-20-ticket-tags.md).
+
 Capture a 15-minute local token after setting `INCIDENT_INTEL_TOKEN_SECRET`; do not paste it into
 logs, screenshots, or the repository:
 

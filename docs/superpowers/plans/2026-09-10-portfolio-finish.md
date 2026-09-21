@@ -20,6 +20,14 @@ passed all 147 tests, lint, image build and the standard Compose/demo rehearsal.
 **September 16 maintenance:** Serialized overlapping in-memory ingestion to preserve receipt,
 payload-hash and correlation-ID consistency. Three regression cases reproduced the prior failure.
 [Verification](../../verification-2026-09-16-ingestion-concurrency.md): 150 local tests passed with
+PostgreSQL and zero skips, plus Ruff, migrations and disposable-container cleanup. Published as
+`b5ac0714f87ec05cd12d021bbbb5c7f0583eef22`; its
+[remote CI](https://github.com/Benjam1nChaqng/incident-intelligence-platform/actions/runs/35119669681)
+passed all 150 tests, lint, image build and the standard Compose/demo rehearsal.
+
+**September 20 maintenance:** Invalid ticket tag shapes now return 422 instead of crashing or
+being silently converted into tags. Corrected requests retain their idempotency key.
+[Verification](../../verification-2026-09-20-ticket-tags.md): 162 local tests passed with
 PostgreSQL and zero skips, plus Ruff, migrations and disposable-container cleanup. The next gate
 is exact-SHA publication and remote CI, recorded in the local daily checkpoint.
 

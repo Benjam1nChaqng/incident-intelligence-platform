@@ -21,10 +21,10 @@ class SupportTicket(BaseModel):
 
     @field_validator("tags", mode="before")
     @classmethod
-    def normalize_tags(cls, value: Any) -> tuple[str, ...]:
+    def normalize_tags(cls, value: Any) -> Any:
         if value is None:
             return ()
-        return tuple(value)
+        return value
 
 
 class LogEvent(BaseModel):

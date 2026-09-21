@@ -15,6 +15,31 @@ def load_payload() -> dict:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("tags", ["authentication", {"authentication": True}, 42])
+async def test_invalid_tags_return_422_without_consuming_idempotency_key(tags: object) -> None:
+    store = InMemoryIngestionStore()
+    app = create_app(ingestion_store=store)
+    payload = load_payload()
+    payload["ticket"]["tags"] = tags
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    headers = {"Idempotency-Key": "fixture-invalid-tags"}
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        invalid = await client.post("/events", headers=headers, json=payload)
+
+        assert invalid.status_code == 422
+        assert invalid.json()["detail"][0]["loc"] == ["body", "ticket", "tags"]
+        assert store.records_by_key == {}
+
+        corrected = await client.post("/events", headers=headers, json=load_payload())
+        replay = await client.post("/events", headers=headers, json=load_payload())
+
+    assert corrected.status_code == 201
+    assert replay.status_code == 200
+    assert replay.json()["duplicate"] is True
+
+
+@pytest.mark.anyio
 async def test_idempotency_conflict_returns_stable_problem_detail() -> None:
     app = create_app(ingestion_store=InMemoryIngestionStore())
     payload = load_payload()
